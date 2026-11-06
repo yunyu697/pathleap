@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  版本号唯一来源。改版本只改这里（或用 tools/Next-LpVersion.ps1 -LpApply 自动改）。
+  规则：major 不受限；minor 与 patch 取值 0–10，超过 10 时向前进位。
+  程序内展示（Branding.Version）、构建、打包、CI 产物名都从 AssemblyInformationalVersion 读取本值。
+-->
+<Project>
+  <PropertyGroup>
+    <!-- 语义化版本字符串：1.0.0 / 1.0.0-alpha1 / 1.1.0 / 2.0.0 ... -->
+    <PathleapVersion>1.0.0-alpha1</PathleapVersion>
+
+    <!-- 由上面的字符串自动去掉 -alphaN 后缀得到 1.0.0，供 AssemblyVersion / FileVersion 使用 -->
+    <PathleapNumericVersion>$([System.String]::Copy('$(PathleapVersion)').Split('-')[0])</PathleapNumericVersion>
+
+    <Version>$(PathleapVersion)</Version>
+    <AssemblyInformationalVersion>$(PathleapVersion)</AssemblyInformationalVersion>
+    <AssemblyVersion>$(PathleapNumericVersion)</AssemblyVersion>
+    <FileVersion>$(PathleapNumericVersion)</FileVersion>
+
+    <!-- 不要把 git 提交哈希追加到 InformationalVersion，否则程序内版本会变成 1.0.0-alpha1+abc1234 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+</Project>

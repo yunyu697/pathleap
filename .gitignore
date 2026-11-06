@@ -1,0 +1,17 @@
+# .NET 构建产物
+bin/
+obj/
+*.user
+*.suo
+
+# 本地数据（运行时生成，位于 %LOCALAPPDATA%\Pathleap，不应进仓库）
+perf/
+logs/
+
+# 本地打包产物
+dist/
+
+# IDE / 工具
+.vs/
+.vscode/
+*.tmp

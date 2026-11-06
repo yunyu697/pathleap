@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 解析版本号
+        id: lpver
+        shell: pwsh
+        run: |
+          $LpRefType = "${{ github.ref_type }}"
+          $LpRefName = "${{ github.ref_name }}"
+          if ($LpRefType -eq 'tag') {
+            if (-not $LpRefName.StartsWith('v')) {
+              throw "tag 必须以 v 开头: $LpRefName"
+            }
+            $LpVersion = $LpRefName.Substring(1)
+          }
+          else {
+            $LpPropsRaw = Get-Content -LiteralPath ./Directory.Build.props -Raw
+            $LpVersion = [regex]::Match($LpPropsRaw, '<PathleapVersion>([^<]+)</PathleapVersion>').Groups[1].Value.Trim()
+          }
+
+          if ($LpVersion -notmatch '^[0-9]+[.][0-9]+[.][0-9]+(-alpha[0-9]+)?$') {
+            throw "版本号不合法: $LpVersion"
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$LpVersion"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifactName=Pathleap-$LpVersion-win-x64"
+
+      - name: 脚本变量命名检查
+        shell: pwsh
+        run: ./tools/Test-LpVariableNames.ps1
+
+      - name: 编译 Release x64（UI / Service / Shared）
+        shell: pwsh
+        run: ./tools/Build-Lp.ps1 -LpConfiguration Release -LpSkipVariableCheck -LpVersion '${{ steps.lpver.outputs.version }}'
+
+      - name: 打包可分发文件
+        shell: pwsh
+        run: ./tools/Package-Lp.ps1 -LpConfiguration Release
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.lpver.outputs.artifactName }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
