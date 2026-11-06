@@ -53,6 +53,18 @@ internal static class WakeBenchmark
                 continue;
             }
 
+            // 探测键是全局 SendInput：只有确认前台窗口是本窗口时才注入，
+            // 否则字符会落进用户正在编辑的窗口里。
+            if (!window.IsForegroundAndVisible())
+            {
+                lpSample.Abort("foreground-not-ours");
+                var lpStray = lpSample.ToResult();
+                lpStray.Cold = lpIndex == 0;
+                lpResults.Add(lpStray);
+                window.HideForBenchmark();
+                continue;
+            }
+
             if (!InputInjector.SendProbeKey(probeChar[0]))
             {
                 lpSample.Abort("send-probe-failed");

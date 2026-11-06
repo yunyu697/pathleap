@@ -308,6 +308,19 @@ internal static class NativeMethods
     public static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint GetWindowThreadProcessId(IntPtr hwnd, IntPtr processId);
+
+    /// <summary>把输入队列挂到另一个线程上，从而绕过前台锁直接抢前台（俗称 AttachThreadInput 技巧）。</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool BringWindowToTop(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetFocus(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetCursorPos(out Point point);
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

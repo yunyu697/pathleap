@@ -10,6 +10,24 @@ public sealed class IpcRequest
 
     /// <summary>仅 BENCH 使用。</summary>
     public int Samples { get; set; }
+
+    /// <summary>
+    /// 仅 BENCH 使用：调用方显式声明可以占用前台。唤醒基准会反复把窗口切到前台，
+    /// 未声明时服务端拒绝执行，避免在用户正常使用时被打断。
+    /// </summary>
+    public bool AllowForeground { get; set; }
+
+    /// <summary>SEARCH 的查询串。</summary>
+    public string Query { get; set; } = string.Empty;
+
+    /// <summary>SEARCH 返回条数上限。</summary>
+    public int Limit { get; set; }
+
+    /// <summary>INDEX_BUILD 的目标：卷（C:）或目录（D:\work）。留空由服务端决定。</summary>
+    public string Root { get; set; } = string.Empty;
+
+    /// <summary>INDEX_BUILD 的来源模式：auto / usn / walk。</summary>
+    public string Mode { get; set; } = string.Empty;
 }
 
 public sealed class IpcReply
@@ -25,6 +43,14 @@ public sealed class IpcReply
     public double P95Ms { get; set; } = -1;
 
     public ServiceStatusDto? Status { get; set; }
+
+    public IndexStatusDto? Index { get; set; }
+
+    public List<SearchHitDto>? Hits { get; set; }
+
+    public double QueryMs { get; set; } = -1;
+
+    public int CandidateCount { get; set; }
 
     public static IpcReply Success(string message = "") => new() { Ok = true, Message = message };
 

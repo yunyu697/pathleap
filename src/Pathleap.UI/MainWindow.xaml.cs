@@ -25,6 +25,10 @@ public sealed partial class MainWindow : Window
     /// <summary>唤出后的失焦宽限期，避免前台锁竞争导致的闪隐。</summary>
     private const double DeactivateGraceMs = 250;
 
+    /// <summary>前台锁重试间隔与次数：Windows 允许前台进程抢焦点，非前台进程会被静默拒绝。</summary>
+    private const int ForegroundRetryDelayMs = 120;
+    private const int ForegroundRetryAttempts = 2;
+
     private readonly AppConfig _lpConfig;
     private readonly IntPtr _lpHwnd;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _lpDispatcher;
@@ -33,6 +37,8 @@ public sealed partial class MainWindow : Window
     private bool _lpVisible;
     private bool _lpAllowClose;
     private long _lpShownTick;
+    private int _lpVisibleSession;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpForegroundRetry;
 
     public MainWindow(AppConfig config)
     {
@@ -58,6 +64,15 @@ public sealed partial class MainWindow : Window
     }
 
     public Microsoft.UI.Dispatching.DispatcherQueue UiDispatcher => _lpDispatcher;
+
+    /// <summary>
+    /// 当前是否确实处于前台且可见。基准测试在注入探测键前必须校验这一条，
+    /// 否则探测键会打到用户当前正在使用的窗口上。
+    /// </summary>
+    public bool IsForegroundAndVisible()
+    {
+        return NativeMethods.GetForegroundWindow().Equals(_lpHwnd) && NativeMethods.IsWindowVisible(_lpHwnd);
+    }
 
     private void ConfigureWindow()
     {
@@ -141,11 +156,84 @@ public sealed partial class MainWindow : Window
     {
         PositionWindow();
         _lpVisible = true;
+        _lpVisibleSession++;
         _lpShownTick = Stopwatch.GetTimestamp();
         Activate();
         NativeMethods.SetForegroundWindow(_lpHwnd);
         SearchBox.Focus(FocusState.Programmatic);
         AppLog.Debug("搜索窗已显示并请求焦点");
+        ScheduleForegroundRetry(_lpVisibleSession, ForegroundRetryAttempts);
+    }
+
+    /// <summary>
+    /// 前台锁重试：非前台进程调用 SetForegroundWindow 会被静默拒绝（返回 false 且不报错），
+    /// 表现为窗口已显示但没有焦点。这里在 120ms 后重试，并用 AttachThreadInput 把输入队列
+    /// 挂到当前前台线程上，使抢占前台能够成功。
+    /// </summary>
+    private void ScheduleForegroundRetry(int session, int attemptsLeft)
+    {
+        if (attemptsLeft <= 0 || !_lpVisible || session != _lpVisibleSession)
+        {
+            return;
+        }
+
+        if (NativeMethods.GetForegroundWindow().Equals(_lpHwnd))
+        {
+            return;
+        }
+
+        _lpForegroundRetry?.Stop();
+        var lpTimer = _lpDispatcher.CreateTimer();
+        lpTimer.Interval = TimeSpan.FromMilliseconds(ForegroundRetryDelayMs);
+        lpTimer.IsRepeating = false;
+        lpTimer.Tick += (_, _) =>
+        {
+            lpTimer.Stop();
+            if (!_lpVisible || session != _lpVisibleSession)
+            {
+                return;
+            }
+
+            if (NativeMethods.GetForegroundWindow().Equals(_lpHwnd))
+            {
+                return;
+            }
+
+            var lpTookForeground = ForceForeground();
+            AppLog.Info($"前台锁重试命中：ok={lpTookForeground}，剩余 {attemptsLeft - 1} 次");
+            ScheduleForegroundRetry(session, attemptsLeft - 1);
+        };
+        _lpForegroundRetry = lpTimer;
+        lpTimer.Start();
+    }
+
+    private bool ForceForeground()
+    {
+        var lpForeground = NativeMethods.GetForegroundWindow();
+        var lpForegroundThread = NativeMethods.GetWindowThreadProcessId(lpForeground, IntPtr.Zero);
+        var lpOwnThread = NativeMethods.GetWindowThreadProcessId(_lpHwnd, IntPtr.Zero);
+        var lpAttached = false;
+        try
+        {
+            if (lpForegroundThread != 0 && lpOwnThread != 0 && lpForegroundThread != lpOwnThread)
+            {
+                lpAttached = NativeMethods.AttachThreadInput(lpForegroundThread, lpOwnThread, true);
+            }
+
+            NativeMethods.BringWindowToTop(_lpHwnd);
+            NativeMethods.SetForegroundWindow(_lpHwnd);
+            NativeMethods.SetFocus(_lpHwnd);
+            Activate();
+            SearchBox.Focus(FocusState.Programmatic);
+            return NativeMethods.GetForegroundWindow().Equals(_lpHwnd);
+        }
+        finally
+        {
+            if (lpAttached)
+            {
+                NativeMethods.AttachThreadInput(lpForegroundThread, lpOwnThread, false);
+            }
+        }
     }
 
     public void HideForBenchmark()
@@ -162,9 +250,12 @@ public sealed partial class MainWindow : Window
 
     private void HideCore()
     {
+        _lpForegroundRetry?.Stop();
+        _lpForegroundRetry = null;
         if (_lpVisible)
         {
             _lpVisible = false;
+            _lpVisibleSession++;
             AppWindow.Hide();
             SearchBox.Text = string.Empty;
             AppLog.Debug("搜索窗已隐藏");

@@ -27,6 +27,16 @@ public static class AppPaths
     /// <summary>服务配置（M1 仅记录模式与日志级别，不含索引参数）。</summary>
     public static string ServiceConfigFile { get; } = Path.Combine(ServiceRoot, "service.json");
 
+    /// <summary>索引快照目录（每卷一个 .plidx 文件）。</summary>
+    public static string IndexRoot { get; } = Path.Combine(ServiceRoot, "index");
+
+    /// <summary>某个卷/根的索引文件名，如 <c>index\C.plidx</c>。</summary>
+    public static string IndexFile(string volumeLabel)
+    {
+        var lpSafe = new string(volumeLabel.Where(static c => char.IsLetterOrDigit(c)).ToArray());
+        return Path.Combine(IndexRoot, (lpSafe.Length == 0 ? "default" : lpSafe) + ".plidx");
+    }
+
     public static string EnsureDirectory(string path)
     {
         Directory.CreateDirectory(path);

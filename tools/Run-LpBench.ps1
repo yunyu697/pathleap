@@ -3,10 +3,12 @@
 .SYNOPSIS
   运行唤醒延迟基准测试（默认 200 次），并打印首帧 / 可输入的分位数。
 .DESCRIPTION
-  需要当前处于解锁的交互式桌面：基准靠 SendInput 注入全局热键，再由真实的 WM_HOTKEY
-  触发显示；锁屏、无桌面会话或热键被其它程序占用时都会失败。
+  这是「前台实测」工具：基准靠 SendInput 注入全局热键，再由真实的 WM_HOTKEY 触发显示，
+  每次采样都会把 Pathleap 窗口切到前台。因此默认拒绝运行，必须显式加 -LpAllowForeground，
+  运行前请自行确认可以占用前台。需要解锁的交互式桌面；锁屏、无桌面会话或热键被其它程序
+  占用时都会失败。索引/查询类性能请用 Run-LpIndexBench.ps1（后台跑，不碰前台）。
 .EXAMPLE
-  pwsh -File .\tools\Run-LpBench.ps1 -LpSamples 200
+  pwsh -File .\tools\Run-LpBench.ps1 -LpSamples 200 -LpAllowForeground
 #>
 [CmdletBinding()]
 param(
@@ -16,7 +18,9 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$LpConfiguration = 'Debug',
 
-    [switch]$LpEnsureRunning
+    [switch]$LpEnsureRunning,
+
+    [switch]$LpAllowForeground
 )
 
 Set-StrictMode -Version Latest
@@ -30,11 +34,17 @@ if (-not (Test-Path -LiteralPath $LpUiExe)) {
     throw "UI 尚未编译: $LpUiExe。请先运行 Build-Lp.ps1。"
 }
 
+if (-not $LpAllowForeground) {
+    $LpEstimatedSeconds = [math]::Round($LpSamples * 0.45)
+    throw ("唤醒基准会把 Pathleap 窗口反复切到前台（共 {0} 次），会打断当前操作，预计占用约 {1} 秒。" -f $LpSamples, $LpEstimatedSeconds) +
+        '确认可以占用前台后再加 -LpAllowForeground 运行。查询/索引类基准请用 Run-LpIndexBench.ps1（后台，无前台窗口）。'
+}
+
 if ($LpEnsureRunning) {
     $LpRunning = @(Get-Process -Name 'Pathleap.UI' -ErrorAction SilentlyContinue)
     if ($LpRunning.Count -eq 0) {
-        Write-Host '启动常驻 UI ...' -ForegroundColor Cyan
-        Start-Process -FilePath $LpUiExe
+        Write-Host '启动常驻 UI（--tray，不显示窗口）...' -ForegroundColor Cyan
+        Start-Process -FilePath $LpUiExe -ArgumentList '--tray'
         Start-Sleep -Seconds 3
     }
 }
@@ -47,7 +57,7 @@ if (Test-Path -LiteralPath $LpSummaryFile) {
 Write-Host "运行基准：$LpSamples 次（热键 Ctrl+Alt+Space，探测键由配置 benchProbeKey 决定） ..." -ForegroundColor Cyan
 Write-Host '测试期间请勿操作键盘鼠标。' -ForegroundColor DarkGray
 
-$LpBenchProcess = Start-Process -FilePath $LpUiExe -ArgumentList @('--bench', "$LpSamples") -PassThru -Wait
+$LpBenchProcess = Start-Process -FilePath $LpUiExe -ArgumentList @('--bench', "$LpSamples", '--allow-foreground') -PassThru -Wait
 Write-Host "基准进程退出码: $($LpBenchProcess.ExitCode)" -ForegroundColor DarkGray
 
 if (-not (Test-Path -LiteralPath $LpSummaryFile)) {

@@ -105,6 +105,14 @@ public partial class App : Application
 
             if (Program.Startup.AutoBench)
             {
+                if (!Program.Startup.AllowForeground)
+                {
+                    // 唤醒基准会反复把窗口切到前台，未获显式许可时不启动。
+                    AppLog.Warn("拒绝自动基准：未声明 --allow-foreground（该基准会反复占用前台）。");
+                    Shutdown(3);
+                    return;
+                }
+
                 // 给服务/托盘一点初始化时间，再跑基准；结果落盘后退出。
                 await Task.Delay(800);
                 var lpSamples = Program.Startup.BenchSamples > 0
@@ -195,6 +203,11 @@ public partial class App : Application
                     $"service={_lpService?.StatusText} benchRunning={_lpBenchRunning}"));
 
             case "BENCH":
+                if (!request.AllowForeground)
+                {
+                    return Task.FromResult<IpcReply>(IpcReply.Failure("拒绝 BENCH：调用方未声明占用前台（需 allowForeground=true）。"));
+                }
+
                 return DispatchToUiAsync(() => RunBenchmarkAsync(request.Samples));
 
             case "QUIT":

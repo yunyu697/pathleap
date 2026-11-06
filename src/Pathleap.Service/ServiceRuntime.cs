@@ -1,20 +1,21 @@
 using Pathleap.Shared;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
+using Pathleap.Service.Index;
 
 namespace Pathleap.Service;
 
 /// <summary>
-/// M1 索引服务空壳：
-///  - 与 UI 完全分离的第二个进程；
-///  - 只提供 PING / STATUS 控制面；
-///  - 真实 MFT / USN 索引在 M2 接入，本阶段 index = not-implemented。
+/// 索引服务：与 UI 完全分离的第二个进程。
+/// 控制面 PING / STATUS / SEARCH / INDEX_STATUS / INDEX_BUILD；
+/// 索引来源优先 USN/MFT（需管理员或服务身份），否则降级目录遍历。
 /// </summary>
 public sealed class ServiceRuntime : IDisposable
 {
     private readonly string _lpMode;
     private readonly DateTimeOffset _lpStartedAt = DateTimeOffset.Now;
     private readonly CancellationTokenSource _lpCts = new();
+    private readonly IndexService _lpIndex = new();
     private Task? _lpPipeTask;
 
     public ServiceRuntime(string mode)
@@ -32,7 +33,8 @@ public sealed class ServiceRuntime : IDisposable
 
         AppLog.Info($"{Branding.DisplayName} 服务启动，模式={_lpMode}，PID={Environment.ProcessId}");
         AppLog.Info($"服务配置: {AppPaths.ServiceConfigFile}");
-        AppLog.Info("索引状态: not-implemented（M1 空壳，M2 接入 FSCTL_ENUM_USN_DATA + USN）");
+        AppLog.Info($"索引目录: {AppPaths.IndexRoot}");
+        _lpIndex.LoadLatest();
 
         _lpPipeTask = PipeServer.RunAsync(Branding.ServicePipeName, HandleRequestAsync, _lpCts.Token);
     }
@@ -41,6 +43,7 @@ public sealed class ServiceRuntime : IDisposable
     {
         AppLog.Info("服务停止中…");
         _lpCts.Cancel();
+        _lpIndex.Dispose();
         try
         {
             _lpPipeTask?.Wait(TimeSpan.FromSeconds(2));
@@ -71,14 +74,84 @@ public sealed class ServiceRuntime : IDisposable
                         Mode = _lpMode,
                         Pid = Environment.ProcessId,
                         UptimeMs = (long)(DateTimeOffset.Now - _lpStartedAt).TotalMilliseconds,
-                        Index = "not-implemented",
+                        Index = _lpIndex.Status.State,
                         Version = Branding.Version,
                         StartedAt = _lpStartedAt
-                    }
+                    },
+                    Index = _lpIndex.Status
                 });
+
+            case "INDEX_STATUS":
+                return Task.FromResult(new IpcReply
+                {
+                    Ok = true,
+                    Message = "index-status",
+                    Index = _lpIndex.Status
+                });
+
+            case "INDEX_BUILD":
+                return Task.Run(() => BuildIndex(request));
+
+            case "SEARCH":
+                return Task.FromResult(SearchIndex(request));
 
             default:
                 return Task.FromResult(IpcReply.Failure($"服务不支持命令: {request.Command}"));
+        }
+    }
+
+    private IpcReply SearchIndex(IpcRequest request)
+    {
+        var lpStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        var lpOutcome = _lpIndex.Search(request.Query, request.Limit > 0 ? request.Limit : 30);
+        if (lpOutcome is null)
+        {
+            return IpcReply.Failure("索引尚未构建，请先执行 INDEX_BUILD");
+        }
+
+        var lpTotalMs = Math.Round(
+            (System.Diagnostics.Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / System.Diagnostics.Stopwatch.Frequency,
+            3);
+
+        return new IpcReply
+        {
+            Ok = true,
+            Message = $"hits={lpOutcome.Hits.Count}",
+            QueryMs = lpOutcome.ElapsedMs,
+            CandidateCount = lpOutcome.CandidateCount,
+            Hits = lpOutcome.Hits.Select(static hit => new SearchHitDto
+            {
+                Name = hit.Name,
+                Path = hit.Path,
+                IsDirectory = hit.IsDirectory,
+                Size = hit.Size,
+                ModifiedAt = hit.ModifiedAt?.ToString("O"),
+                Tier = hit.Tier,
+                Score = hit.Score
+            }).ToList(),
+            Index = _lpIndex.Status,
+            P50Ms = lpTotalMs
+        };
+    }
+
+    private IpcReply BuildIndex(IpcRequest request)
+    {
+        try
+        {
+            var lpResult = _lpIndex.Build(request.Root, request.Mode, _lpCts.Token);
+            return new IpcReply
+            {
+                Ok = true,
+                Message = $"index-built entries={lpResult.EntryCount}",
+                Index = _lpIndex.Status,
+                P50Ms = lpResult.BuildMs,
+                QueryMs = lpResult.BuildMs
+            };
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("索引构建失败", ex);
+            return IpcReply.Failure("索引构建失败: " + ex.Message);
         }
     }
 

@@ -1,9 +1,10 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  M1 空壳冒烟测试：进程、单实例、托盘/热键、UI 与服务管道、配置与日志。
+  M1/M2 空壳冒烟测试：进程、单实例、托盘/热键、UI 与服务管道、配置与日志。
 .DESCRIPTION
   只做只读检查；-LpStop 时在结尾调用 --quit 关闭被测实例。
+  被测实例用 --tray 启动，不显示窗口、不抢前台；本脚本不做任何前台激活或键鼠注入。
 .EXAMPLE
   pwsh -File .\tools\Test-LpSmoke.ps1 -LpStop
 #>
@@ -104,8 +105,8 @@ if (-not (Test-Path -LiteralPath $LpUiExe)) {
 # 2. 启动常驻实例
 $LpUiProcesses = @(Get-Process -Name 'Pathleap.UI' -ErrorAction SilentlyContinue)
 if ($LpUiProcesses.Count -eq 0) {
-    Write-Host '启动常驻 UI ...' -ForegroundColor Cyan
-    Start-Process -FilePath $LpUiExe
+    Write-Host '启动常驻 UI（--tray，不显示窗口）...' -ForegroundColor Cyan
+    Start-Process -FilePath $LpUiExe -ArgumentList '--tray'
 }
 else {
     Write-Host "UI 已在运行: PID $($LpUiProcesses[0].Id)" -ForegroundColor DarkGray
@@ -119,7 +120,13 @@ Add-LpCheck -LpName '全局热键已注册' -LpPassed ($LpUiStatus.message -matc
 # 4. 服务管道（UI 会自动拉起服务）
 $LpServiceStatus = Wait-LpPipeCommand -LpPipeName 'Pathleap.Service' -LpCommand 'STATUS' -LpWaitSeconds 20
 Add-LpCheck -LpName '服务管道可用' -LpPassed ([bool]$LpServiceStatus.ok) -LpDetail ("mode=" + $LpServiceStatus.status.mode + ", pid=" + $LpServiceStatus.status.pid)
-Add-LpCheck -LpName '索引未实现（M1 预期）' -LpPassed ($LpServiceStatus.status.index -eq 'not-implemented') -LpDetail ("index=" + $LpServiceStatus.status.index)
+
+$LpIndexStatus = Wait-LpPipeCommand -LpPipeName 'Pathleap.Service' -LpCommand 'INDEX_STATUS' -LpWaitSeconds 20
+$LpIndexDetail = 'index=null'
+if ($null -ne $LpIndexStatus.index) {
+    $LpIndexDetail = 'state=' + $LpIndexStatus.index.state + ', entries=' + $LpIndexStatus.index.entryCount + ', source=' + $LpIndexStatus.index.source
+}
+Add-LpCheck -LpName '索引状态可读' -LpPassed ($null -ne $LpIndexStatus.index) -LpDetail $LpIndexDetail
 
 # 5. 配置与日志
 Add-LpCheck -LpName '配置文件存在' -LpPassed (Test-Path -LiteralPath $LpConfigFile) -LpDetail $LpConfigFile

@@ -5,12 +5,17 @@ using Pathleap.Shared.Ipc;
 
 namespace Pathleap.UI;
 
-/// <summary>命令行语义：无参数=常驻并显示一次；--bench=基准测试；--show/--status/--quit 为控制命令。</summary>
+/// <summary>命令行语义：无参数=常驻并显示一次；--tray=常驻但不显示（测试/后台用）；--bench=基准测试；--show/--status/--quit 为控制命令。</summary>
 internal sealed class StartupOptions
 {
     public string Command { get; set; } = string.Empty;
 
     public bool AutoBench { get; set; }
+
+    /// <summary>
+    /// 唤醒基准会反复抢前台，必须由调用方显式声明可以占用前台（--allow-foreground）。
+    /// </summary>
+    public bool AllowForeground { get; set; }
 
     public int BenchSamples { get; set; }
 
@@ -33,6 +38,13 @@ internal sealed class StartupOptions
                         lpIndex++;
                     }
 
+                    break;
+                case "--allow-foreground":
+                    lpOptions.AllowForeground = true;
+                    break;
+                case "--tray":
+                    // 常驻但不显示：托盘 + 热键照常注册，不抢前台。冒烟测试与自动化用它。
+                    lpOptions.ShowOnStart = false;
                     break;
                 case "--show":
                     lpOptions.Command = "SHOW";
@@ -105,7 +117,14 @@ public static class Program
             var lpRequest = new IpcRequest { Command = Startup.Command };
             if (Startup.Command == "BENCH")
             {
+                if (!Startup.AllowForeground)
+                {
+                    AppLog.Warn("拒绝转发 BENCH：未声明 --allow-foreground（该基准会反复占用前台）。");
+                    return 3;
+                }
+
                 lpRequest.Samples = Startup.BenchSamples;
+                lpRequest.AllowForeground = true;
             }
 
             var lpTimeout = Startup.Command == "BENCH" ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(5);
