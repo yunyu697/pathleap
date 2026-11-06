@@ -5,8 +5,9 @@ obj/
 *.suo
 
 # 本地数据（运行时生成，位于 %LOCALAPPDATA%\Pathleap，不应进仓库）
-perf/
-logs/
+# 只匹配仓库根目录，避免误伤 src/Pathleap.UI/Perf/ 这样的源码目录
+/perf/
+/logs/
 
 # 本地打包产物
 dist/
