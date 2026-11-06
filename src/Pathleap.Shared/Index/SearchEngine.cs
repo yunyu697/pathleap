@@ -118,7 +118,7 @@ public sealed class SearchEngine
             var lpRecord = _lpSnapshot.GetRecord(lpIndex);
             var lpHit = new SearchHit
             {
-                Name = IndexSnapshot.DecodeName(_lpSnapshot.GetNameSpan(lpRecord)),
+                Name = _lpSnapshot.DecodeNameAt(lpIndex),
                 Path = _lpSnapshot.BuildPath(lpIndex),
                 IsDirectory = lpRecord.IsDirectory,
                 Size = (long)lpRecord.Size,
@@ -201,12 +201,11 @@ public sealed class SearchEngine
         foreach (var lpIndex in lpPrimary)
         {
             var lpRecord = _lpSnapshot.GetRecord(lpIndex);
-            var lpName = _lpSnapshot.GetNameSpan(lpRecord);
             var lpBestTier = int.MaxValue;
             var lpAllMatched = true;
             foreach (var lpToken in tokens)
             {
-                var lpTier = TierOf(lpName, lpToken);
+                var lpTier = TierOfIndex(lpIndex, lpRecord, lpToken);
                 if (lpTier == 0)
                 {
                     lpAllMatched = false;
@@ -226,51 +225,161 @@ public sealed class SearchEngine
         }
     }
 
-    /// <summary>0 = 不匹配；100/85/70 对应三种 tier。</summary>
-    private static int TierOf(ReadOnlySpan<byte> name, ReadOnlySpan<byte> foldedToken)
+    /// <summary>0 = 不匹配；100/85/70 对应三种 tier。名字 = 块首前缀 + 后缀，两段分别比较。</summary>
+    private int TierOfIndex(int index, IndexRecord record, ReadOnlySpan<byte> foldedToken)
     {
-        if (name.Length >= foldedToken.Length && StartsWith(name, foldedToken))
+        if (record.NameLength >= foldedToken.Length)
         {
-            return name.Length == foldedToken.Length ? TierExact : TierPrefix;
+            var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(index);
+            var lpPrefix = _lpSnapshot.GetBlockStartNameSpan(index);
+            var lpSuffix = _lpSnapshot.GetSuffixSpan(index, record);
+            var lpMatchedPrefix = Math.Min(foldedToken.Length, lpPrefixLen);
+            var lpOk = true;
+            for (var lpI = 0; lpI < lpMatchedPrefix; lpI++)
+            {
+                if (AsciiLower(lpPrefix[lpI]) != foldedToken[lpI])
+                {
+                    lpOk = false;
+                    break;
+                }
+            }
+
+            if (lpOk)
+            {
+                var lpRemaining = foldedToken.Length - lpPrefixLen;
+                if (lpRemaining <= 0)
+                {
+                    return record.NameLength == foldedToken.Length ? TierExact : TierPrefix;
+                }
+
+                if (lpSuffix.Length >= lpRemaining)
+                {
+                    for (var lpK = 0; lpK < lpRemaining; lpK++)
+                    {
+                        if (AsciiLower(lpSuffix[lpK]) != foldedToken[lpPrefixLen + lpK])
+                        {
+                            lpOk = false;
+                            break;
+                        }
+                    }
+
+                    if (lpOk)
+                    {
+                        return record.NameLength == foldedToken.Length ? TierExact : TierPrefix;
+                    }
+                }
+            }
         }
 
-        return FoldContains(name, foldedToken) ? TierSubstring : 0;
+        return NameContains(index, record, foldedToken) ? TierSubstring : 0;
     }
 
-    /// <summary>
-    /// 子串命中：直接在整块名字区（连续 130MB 级 UTF-8 缓冲）上做向量化首字节扫描，
-    /// 命中后再二分定位条目并校验完整落在该名字内。这样避开了逐条目建 span 的开销，
-    /// 500 万条目的扫描从“每条一次函数调用”降到“整块内存一次通过”。
-    /// </summary>
+    /// <summary>名字（前缀 + 后缀）是否包含 token；跨前缀/后缀衔接处的命中也要算上。</summary>
+    private bool NameContains(int index, IndexRecord record, ReadOnlySpan<byte> foldedToken)
+    {
+        var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(index);
+        var lpPrefix = _lpSnapshot.GetBlockStartNameSpan(index);
+        var lpSuffix = _lpSnapshot.GetSuffixSpan(index, record);
+
+        if (lpPrefixLen == 0)
+        {
+            return FoldContains(lpSuffix, foldedToken);
+        }
+
+        if (FoldContains(lpPrefix[..lpPrefixLen], foldedToken) || FoldContains(lpSuffix, foldedToken))
+        {
+            return true;
+        }
+
+        return HasJunctionMatch(lpPrefix, lpPrefixLen, lpSuffix, foldedToken);
+    }
+
+    /// <summary>token 从块首前缀末尾跨进后缀的匹配（前缀长度由调用方给出）。</summary>
+    private static bool HasJunctionMatch(
+        ReadOnlySpan<byte> blockName,
+        int prefixLen,
+        ReadOnlySpan<byte> suffix,
+        ReadOnlySpan<byte> foldedToken)
+    {
+        var lpTokenLength = foldedToken.Length;
+        var lpMaxJ = Math.Min(lpTokenLength - 1, prefixLen);
+        for (var lpJ = 1; lpJ <= lpMaxJ; lpJ++)
+        {
+            // 先比最容易否掉的一个字节：前缀的最后一个字节必须等于 token[j-1]。
+            if (AsciiLower(blockName[prefixLen - 1]) != foldedToken[lpJ - 1])
+            {
+                continue;
+            }
+
+            var lpOk = true;
+            for (var lpK = 0; lpK < lpJ; lpK++)
+            {
+                if (AsciiLower(blockName[prefixLen - lpJ + lpK]) != foldedToken[lpK])
+                {
+                    lpOk = false;
+                    break;
+                }
+            }
+
+            if (!lpOk)
+            {
+                continue;
+            }
+
+            var lpRest = lpTokenLength - lpJ;
+            if (lpRest > suffix.Length)
+            {
+                continue;
+            }
+
+            for (var lpK = 0; lpK < lpRest; lpK++)
+            {
+                if (AsciiLower(suffix[lpK]) != foldedToken[lpJ + lpK])
+                {
+                    lpOk = false;
+                    break;
+                }
+            }
+
+            if (lpOk)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private List<int> FindSubstringMatches(byte[] token, int count, int skipLow, int skipHigh)
     {
         var lpResult = new List<int>(Math.Min(1024, count));
         var lpFirstValues = CreateFirstByteValues(token[0]);
         var lpPartitions = count < ParallelThreshold ? 1 : Environment.ProcessorCount * 2;
-        var lpChunk = Math.Max(1, count / lpPartitions);
 
-        if (lpPartitions == 1)
+        // 分片边界对齐到前缀编码块，避免一个块被切到两个分片里导致块首名的命中漏算。
+        var lpChunk = Math.Max(
+            IndexFormat.PrefixBlockSize,
+            (count / lpPartitions / IndexFormat.PrefixBlockSize) * IndexFormat.PrefixBlockSize);
+
+        if (lpPartitions == 1 || lpChunk >= count)
         {
             ScanArenaRange(token, lpFirstValues, 0, count, skipLow, skipHigh, lpResult, SingleScanMatchCap);
             return lpResult;
         }
 
-        var lpLocal = new List<int>[lpPartitions];
-        Parallel.For(0, lpPartitions, lpPart =>
+        var lpPartitionCount = (count + lpChunk - 1) / lpChunk;
+        var lpLocal = new List<int>[lpPartitionCount];
+        Parallel.For(0, lpPartitionCount, lpPart =>
         {
             var lpStart = lpPart * lpChunk;
-            var lpEnd = lpPart == lpPartitions - 1 ? count : Math.Min(count, lpStart + lpChunk);
+            var lpEnd = Math.Min(count, lpStart + lpChunk);
             var lpList = new List<int>(256);
-            if (lpStart < lpEnd)
-            {
-                ScanArenaRange(token, lpFirstValues, lpStart, lpEnd, skipLow, skipHigh, lpList, PerPartitionMatchCap);
-            }
-
+            ScanArenaRange(token, lpFirstValues, lpStart, lpEnd, skipLow, skipHigh, lpList, PerPartitionMatchCap);
             lpLocal[lpPart] = lpList;
         });
 
         // 分片按条目下标从小到大扫描，顺序拼接即可保持名字升序。
-        for (var lpPart = 0; lpPart < lpPartitions; lpPart++)
+        for (var lpPart = 0; lpPart < lpPartitionCount; lpPart++)
         {
             lpResult.AddRange(lpLocal[lpPart]);
         }
@@ -278,6 +387,12 @@ public sealed class SearchEngine
         return lpResult;
     }
 
+    /// <summary>
+    /// 子串命中：在名字后缀区（连续字节）上做向量化首字节扫描，命中后按偏移单调定位条目，
+    /// 并校验完整落在该条目自己的后缀内。块首名的后缀就是全名，因此块首名里的命中还要
+    /// 追加给它块内所有“前缀够长”的兄弟条目；最后逐条补查跨前缀/后缀衔接处的命中。
+    /// 三路合起来覆盖名字里所有字节区间，不留盲区。
+    /// </summary>
     private void ScanArenaRange(
         byte[] token,
         SearchValues<byte> firstValues,
@@ -291,65 +406,128 @@ public sealed class SearchEngine
         var lpArena = _lpSnapshot.GetArenaSpan();
         var lpFirstRecord = _lpSnapshot.GetRecord(startEntry);
         var lpLastRecord = _lpSnapshot.GetRecord(endEntry - 1);
+        var lpLastSuffixLen = lpLastRecord.NameLength - _lpSnapshot.GetPrefixLength(endEntry - 1);
         var lpByteStart = (int)lpFirstRecord.NameOffset;
-        var lpByteEnd = (int)(lpLastRecord.NameOffset + lpLastRecord.NameLength);
-        lpByteEnd = Math.Min(lpByteEnd, lpArena.Length);
-        if (lpByteStart >= lpByteEnd)
+        var lpByteEnd = Math.Min((int)lpLastRecord.NameOffset + lpLastSuffixLen, lpArena.Length);
+        var lpTokenLength = token.Length;
+        var lpSeen = new HashSet<int>();
+
+        // 后缀区命中：完整落在某个条目的后缀内才算（跨界的那部分由衔接检查兜底）。
+        if (lpByteStart < lpByteEnd)
+        {
+            var lpSpan = lpArena[lpByteStart..lpByteEnd];
+            var lpPos = 0;
+            var lpEntryCursor = startEntry;
+            while (lpPos < lpSpan.Length)
+            {
+                var lpFound = lpSpan[lpPos..].IndexOfAny(firstValues);
+                if (lpFound < 0)
+                {
+                    break;
+                }
+
+                var lpAbsolute = lpPos + lpFound;
+                lpPos = lpAbsolute + 1;
+                if (lpAbsolute + lpTokenLength > lpSpan.Length)
+                {
+                    break;
+                }
+
+                if (!FoldEquals(lpSpan.Slice(lpAbsolute, lpTokenLength), token))
+                {
+                    continue;
+                }
+
+                var lpOffset = lpByteStart + lpAbsolute;
+                while (lpEntryCursor + 1 < endEntry
+                       && (int)_lpSnapshot.GetRecord(lpEntryCursor + 1).NameOffset <= lpOffset)
+                {
+                    lpEntryCursor++;
+                }
+
+                var lpRecord = _lpSnapshot.GetRecord(lpEntryCursor);
+                var lpSuffixStart = (int)lpRecord.NameOffset;
+                var lpSuffixLen = lpRecord.NameLength - _lpSnapshot.GetPrefixLength(lpEntryCursor);
+                if (lpOffset + lpTokenLength > lpSuffixStart + lpSuffixLen)
+                {
+                    continue;
+                }
+
+                AddSubstringHit(lpEntryCursor, skipLow, skipHigh, lpSeen, target);
+
+                // 块首条目的后缀就是块首名全名：其中的命中同样属于块内前缀覆盖到该位置的条目。
+                if (lpEntryCursor == _lpSnapshot.BlockStartIndex(lpEntryCursor))
+                {
+                    var lpRelative = lpOffset - lpSuffixStart;
+                    var lpBlockEnd = Math.Min(lpEntryCursor + IndexFormat.PrefixBlockSize, endEntry);
+                    for (var lpSibling = lpEntryCursor + 1; lpSibling < lpBlockEnd; lpSibling++)
+                    {
+                        if (_lpSnapshot.GetPrefixLength(lpSibling) >= lpRelative + lpTokenLength)
+                        {
+                            AddSubstringHit(lpSibling, skipLow, skipHigh, lpSeen, target);
+                        }
+                    }
+                }
+
+                if (lpSeen.Count >= cap)
+                {
+                    break;
+                }
+            }
+        }
+
+        // 跨前缀/后缀衔接处的命中：逐个条目补查（每条只比几个字节，可接受）。
+        for (var lpIndex = startEntry; lpIndex < endEntry; lpIndex++)
+        {
+            if (lpSeen.Count >= cap)
+            {
+                break;
+            }
+
+            if (lpIndex >= skipLow && lpIndex < skipHigh)
+            {
+                continue;
+            }
+
+            var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(lpIndex);
+            if (lpPrefixLen == 0)
+            {
+                continue;
+            }
+
+            var lpRecord = _lpSnapshot.GetRecord(lpIndex);
+            var lpSuffix = _lpSnapshot.GetSuffixSpan(lpIndex, lpRecord);
+            if (lpSuffix.Length == 0)
+            {
+                continue;
+            }
+
+            if (HasJunctionMatch(_lpSnapshot.GetBlockStartNameSpan(lpIndex), lpPrefixLen, lpSuffix, token))
+            {
+                AddSubstringHit(lpIndex, skipLow, skipHigh, lpSeen, target);
+            }
+        }
+
+        // 三路追加顺序不保证严格升序，统一排一次（分片上限 4096，成本可忽略），
+        // 让分片拼接后仍是名字升序，和原来的桶内顺序保持一致。
+        target.Sort();
+    }
+
+    private static void AddSubstringHit(
+        int index,
+        int skipLow,
+        int skipHigh,
+        HashSet<int> seen,
+        List<int> target)
+    {
+        if (index >= skipLow && index < skipHigh)
         {
             return;
         }
 
-        var lpSpan = lpArena[lpByteStart..lpByteEnd];
-        var lpTokenLength = token.Length;
-        var lpPos = 0;
-
-        // 名字区按条目顺序连续排布、偏移升序，扫描位置单调递增，
-        // 因此条目下标也用游标单调推进：每次命中只前进几次，避免每个命中都做 ~23 次二分的定位。
-        var lpEntryCursor = startEntry;
-        while (lpPos < lpSpan.Length)
+        if (seen.Add(index))
         {
-            var lpFound = lpSpan[lpPos..].IndexOfAny(firstValues);
-            if (lpFound < 0)
-            {
-                return;
-            }
-
-            var lpAbsolute = lpPos + lpFound;
-            lpPos = lpAbsolute + 1;
-            if (lpAbsolute + lpTokenLength > lpSpan.Length)
-            {
-                return;
-            }
-
-            if (!FoldEquals(lpSpan.Slice(lpAbsolute, lpTokenLength), token))
-            {
-                continue;
-            }
-
-            var lpOffset = (uint)(lpByteStart + lpAbsolute);
-            while (lpEntryCursor + 1 < endEntry
-                   && _lpSnapshot.GetRecord(lpEntryCursor + 1).NameOffset <= lpOffset)
-            {
-                lpEntryCursor++;
-            }
-
-            // 跨条目边界的命中不算：必须完整落在该名字范围内。
-            var lpRecord = _lpSnapshot.GetRecord(lpEntryCursor);
-            if (lpOffset + (uint)lpTokenLength > lpRecord.NameOffset + lpRecord.NameLength)
-            {
-                continue;
-            }
-
-            if (lpEntryCursor >= skipLow && lpEntryCursor < skipHigh)
-            {
-                continue;
-            }
-
-            target.Add(lpEntryCursor);
-            if (target.Count >= cap)
-            {
-                return;
-            }
+            target.Add(index);
         }
     }
 
@@ -432,11 +610,18 @@ public sealed class SearchEngine
     private byte[] FoldedNameBytes(int index)
     {
         var lpRecord = _lpSnapshot.GetRecord(index);
-        var lpSpan = _lpSnapshot.GetNameSpan(lpRecord);
-        var lpBytes = new byte[lpSpan.Length];
-        for (var lpI = 0; lpI < lpSpan.Length; lpI++)
+        var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(index);
+        var lpBytes = new byte[lpRecord.NameLength];
+        var lpPrefix = _lpSnapshot.GetBlockStartNameSpan(index);
+        var lpSuffix = _lpSnapshot.GetSuffixSpan(index, lpRecord);
+        for (var lpI = 0; lpI < lpPrefixLen; lpI++)
         {
-            lpBytes[lpI] = AsciiLower(lpSpan[lpI]);
+            lpBytes[lpI] = AsciiLower(lpPrefix[lpI]);
+        }
+
+        for (var lpI = 0; lpI < lpSuffix.Length; lpI++)
+        {
+            lpBytes[lpPrefixLen + lpI] = AsciiLower(lpSuffix[lpI]);
         }
 
         return lpBytes;

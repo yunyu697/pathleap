@@ -7,7 +7,7 @@ namespace Pathleap.Shared.Index;
 
 /// <summary>
 /// 索引文件格式常量。单文件、只读映射、无全量反序列化：
-///  [Header 256B][Entries N × 32B][NameArena]。
+///  [Header 256B][Entries N × 16B][NameArena]。
 /// 条目里只存文件名与父节点下标，完整路径在查询结果里按父链重建（只对前 K 条做）。
 /// </summary>
 public static class IndexFormat
@@ -15,21 +15,41 @@ public static class IndexFormat
     /// <summary>"PLXI"（Pathleap IndeX）。</summary>
     public const uint Magic = 0x504C5849;
 
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 4;
 
     public const int HeaderSize = 256;
 
     /// <summary>
-    /// 单条记录 20 字节：500 万条记录区约 100 MB（32 字节方案是 160 MB）。
-    /// 为了压到索引体积目标，把体积按 KiB、修改时间按秒存：两者只用于结果列表展示，
-    /// 不需要字节级/毫秒级精度。深度用 1 字节（路径深度不可能超过 255）。
+    /// 名字前缀编码的块大小：每个块的第一条存全名，其余条目只存“与块首名的公共前缀长度 + 后缀”。
+    /// 实测 C:\Windows：块大小 5 时名字区从 50.8 B/条降到 26.5 B/条，且块首名本身也在名字区里，
+    /// 子串扫描仍然只扫一遍字节流。块越小压缩率越高，但块首名越多、扫描字节越多，5 是实测折中。
     /// </summary>
-    public const int RecordSize = 20;
+    public const int PrefixBlockSize = 5;
+
+    /// <summary>前缀长度用 1 字节存，上限 255。</summary>
+    public const int MaxPrefix = 255;
+
+    /// <summary>
+    /// 单条记录 16 字节（500 万条记录区约 80 MB）。字段打包规则：
+    ///  - 体积按 KiB 存 28 位（上限 256 GiB，超出截断），高 4 位放 Flags；
+    ///  - 名字长度按 UTF-8 字节存 10 位（Windows 文件名上限 255 个 UTF-16 码元，
+    ///    UTF-8 最多约 765 字节，1023 足够），低 6 位放深度（超过 63 层按 63 记录）；
+    ///  - 修改时间按天存 16 位（约到 2149 年，列表展示精确到天）。
+    /// </summary>
+    public const int RecordSize = 16;
+
+    public const int MaxNameBytes = 1023;
+
+    public const int MaxDepth = 63;
 
     // Header 内固定偏移
     public const int OffsetMagic = 0;
     public const int OffsetFormatVersion = 4;
     public const int OffsetEntryCount = 8;
+
+    /// <summary>u16：当前记录宽度，便于读取侧/测量脚本按实际布局解析。</summary>
+    public const int OffsetRecordSize = 12;
+
     public const int OffsetArenaOffset = 16;
     public const int OffsetArenaSize = 24;
     public const int OffsetBuildUnixMs = 32;
@@ -46,29 +66,69 @@ public static class IndexFormat
     public const byte FlagReparse = 8;
 }
 
-/// <summary>落盘条目（20 字节，字段顺序即磁盘布局，不可随意调整）。</summary>
+/// <summary>落盘条目（16 字节，字段顺序即磁盘布局，不可随意调整）。</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 1, Size = IndexFormat.RecordSize)]
 public struct IndexRecord
 {
     public uint NameOffset;
 
-    public ushort NameLength;
-
-    public byte Depth;
-
-    public byte Flags;
-
     public int ParentIndex;
 
+    /// <summary>高 4 位 Flags，低 28 位体积（KiB）。</summary>
+    public uint SizeAndFlags;
+
+    /// <summary>低 10 位名字字节数，高 6 位路径深度。</summary>
+    public ushort LengthDepth;
+
+    /// <summary>最后修改时间，Unix 天（0 表示未知）。</summary>
+    public ushort ModifiedDays;
+
+    public ushort NameLength => (ushort)(LengthDepth & 0x03FF);
+
+    public byte Depth => (byte)((LengthDepth >> 10) & 0x3F);
+
+    public byte Flags => (byte)(SizeAndFlags >> 28);
+
     /// <summary>文件体积，单位 KiB（0 表示目录或未知）。</summary>
-    public uint SizeKb;
+    public uint SizeKb => SizeAndFlags & 0x0FFFFFFF;
 
     /// <summary>最后修改时间，Unix 秒（0 表示未知）。</summary>
-    public uint ModifiedUnixSec;
+    public uint ModifiedUnixSec => (uint)ModifiedDays * 86400u;
 
     public bool IsDirectory => (Flags & IndexFormat.FlagDirectory) != 0;
 
     public long Size => (long)SizeKb * 1024;
+
+    public static uint PackSizeAndFlags(long sizeBytes, byte flags)
+    {
+        var lpSizeKb = (uint)Math.Clamp(sizeBytes / 1024, 0L, 0x0FFFFFFFL);
+        return lpSizeKb | ((uint)(flags & 0x0F) << 28);
+    }
+
+    public static ushort PackLengthDepth(int nameBytes, int depth)
+    {
+        var lpLength = Math.Clamp(nameBytes, 0, IndexFormat.MaxNameBytes);
+        var lpDepth = Math.Clamp(depth, 0, IndexFormat.MaxDepth);
+        return (ushort)(lpLength | (lpDepth << 10));
+    }
+
+    public static ushort PackModifiedDays(long fileTimeTicks)
+    {
+        if (fileTimeTicks <= 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            var lpDays = DateTimeOffset.FromFileTime(fileTimeTicks).ToUnixTimeSeconds() / 86400;
+            return (ushort)Math.Clamp(lpDays, 0L, (long)ushort.MaxValue);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return 0;
+        }
+    }
 }
 
 /// <summary>构建期可变节点。只在建索引时存在，落盘前转成紧凑记录。</summary>
@@ -108,6 +168,9 @@ public sealed class IndexBuildResult
     public int SkippedCount { get; set; }
 
     public long FileBytes { get; set; }
+
+    /// <summary>因名字前缀编码而省掉的名字区字节数。</summary>
+    public long NamePrefixSavedBytes { get; set; }
 
     public double BuildMs { get; set; }
 
@@ -189,28 +252,52 @@ public sealed unsafe class IndexSnapshot : IDisposable
 
         var lpRecords = new IndexRecord[nodes.Count];
         var lpArena = new List<byte>(Math.Max(1024, nodes.Count * 8));
+        var lpPrefixLens = new byte[nodes.Count];
 
+        // 名字前缀编码：每个块的首条存全名，块内其余条目只存与块首名的公共前缀长度和后缀。
+        // 真实目录里相邻名字（尤其 WinSxS 的组件名）共享很长前缀，实测 C:\Windows 平均共享 38 字节。
+        // 同一个块的首条名本身也是名字区里的普通字节，所以子串扫描仍可整块流式扫描，不需要逐条解码。
+        var lpBlockStartBytes = Array.Empty<byte>();
+        var lpPrefixSavedBytes = 0L;
         for (var lpNew = 0; lpNew < lpOrder.Length; lpNew++)
         {
             var lpOld = lpOrder[lpNew];
             var lpNode = nodes[lpOld];
-            var lpNameBytes = EncodeName(lpNode.Name);
+            var lpNameBytes = EncodeNameCapped(lpNode.Name);
             var lpParent = lpNode.ParentIndex < 0 ? IndexFormat.NoParent : lpRemap[lpNode.ParentIndex];
+
+            int lpPrefixLen;
+            if (lpNew % IndexFormat.PrefixBlockSize == 0)
+            {
+                lpBlockStartBytes = lpNameBytes;
+                lpPrefixLen = 0;
+            }
+            else
+            {
+                lpPrefixLen = Math.Min(
+                    CommonPrefixLength(lpBlockStartBytes, lpNameBytes),
+                    Math.Min(IndexFormat.MaxPrefix, lpNameBytes.Length));
+            }
+
+            lpPrefixLens[lpNew] = (byte)lpPrefixLen;
+            lpPrefixSavedBytes += lpPrefixLen;
+            var lpSuffix = lpNameBytes.AsSpan(lpPrefixLen);
 
             lpRecords[lpNew] = new IndexRecord
             {
                 NameOffset = (uint)lpArena.Count,
-                NameLength = (ushort)Math.Min(lpNameBytes.Length, ushort.MaxValue),
-                Depth = (byte)Math.Min(lpNode.Depth, byte.MaxValue),
                 ParentIndex = lpParent,
-                Flags = lpNode.Flags,
-                SizeKb = (uint)Math.Clamp(lpNode.Size / 1024, 0L, (long)uint.MaxValue),
-                ModifiedUnixSec = ToUnixSeconds(lpNode.ModifiedTicks)
+                SizeAndFlags = IndexRecord.PackSizeAndFlags(lpNode.Size, lpNode.Flags),
+                LengthDepth = IndexRecord.PackLengthDepth(lpNameBytes.Length, lpNode.Depth),
+                ModifiedDays = IndexRecord.PackModifiedDays(lpNode.ModifiedTicks)
             };
-            lpArena.AddRange(lpNameBytes);
+            lpArena.AddRange(lpSuffix);
         }
 
-        var lpArenaOffset = IndexFormat.HeaderSize + (long)lpRecords.Length * IndexFormat.RecordSize;
+        // 布局：[Header 256B][Records 16B × N][PrefixLens 1B × N][名字后缀区]
+        var lpArenaOffset = IndexFormat.HeaderSize
+            + (long)lpRecords.Length * IndexFormat.RecordSize
+            + lpRecords.Length;
         var lpFileBytes = lpArenaOffset + lpArena.Count;
         var lpTemp = outputPath + ".tmp";
 
@@ -221,6 +308,7 @@ public sealed unsafe class IndexSnapshot : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetMagic), IndexFormat.Magic);
             BinaryPrimitives.WriteInt32LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetFormatVersion), IndexFormat.FormatVersion);
             BinaryPrimitives.WriteInt32LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetEntryCount), lpRecords.Length);
+            BinaryPrimitives.WriteUInt16LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetRecordSize), (ushort)IndexFormat.RecordSize);
             BinaryPrimitives.WriteInt64LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetArenaOffset), lpArenaOffset);
             BinaryPrimitives.WriteInt64LittleEndian(lpHeader.AsSpan(IndexFormat.OffsetArenaSize), lpArena.Count);
             BinaryPrimitives.WriteInt64LittleEndian(
@@ -237,15 +325,14 @@ public sealed unsafe class IndexSnapshot : IDisposable
             foreach (var lpRecord in lpRecords)
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(lpRecordBytes.AsSpan(0), lpRecord.NameOffset);
-                BinaryPrimitives.WriteUInt16LittleEndian(lpRecordBytes.AsSpan(4), lpRecord.NameLength);
-                lpRecordBytes[6] = lpRecord.Depth;
-                lpRecordBytes[7] = lpRecord.Flags;
-                BinaryPrimitives.WriteInt32LittleEndian(lpRecordBytes.AsSpan(8), lpRecord.ParentIndex);
-                BinaryPrimitives.WriteUInt32LittleEndian(lpRecordBytes.AsSpan(12), lpRecord.SizeKb);
-                BinaryPrimitives.WriteUInt32LittleEndian(lpRecordBytes.AsSpan(16), lpRecord.ModifiedUnixSec);
+                BinaryPrimitives.WriteInt32LittleEndian(lpRecordBytes.AsSpan(4), lpRecord.ParentIndex);
+                BinaryPrimitives.WriteUInt32LittleEndian(lpRecordBytes.AsSpan(8), lpRecord.SizeAndFlags);
+                BinaryPrimitives.WriteUInt16LittleEndian(lpRecordBytes.AsSpan(12), lpRecord.LengthDepth);
+                BinaryPrimitives.WriteUInt16LittleEndian(lpRecordBytes.AsSpan(14), lpRecord.ModifiedDays);
                 lpStream.Write(lpRecordBytes, 0, lpRecordBytes.Length);
             }
 
+            lpStream.Write(lpPrefixLens, 0, lpPrefixLens.Length);
             lpStream.Write(lpArena.ToArray(), 0, lpArena.Count);
             lpStream.Flush(flushToDisk: true);
         }
@@ -259,6 +346,7 @@ public sealed unsafe class IndexSnapshot : IDisposable
             EntryCount = lpRecords.Length,
             SkippedCount = skippedCount,
             FileBytes = lpFileBytes,
+            NamePrefixSavedBytes = lpPrefixSavedBytes,
             BuildMs = Math.Round(lpTotalMs, 1),
             Source = sourceLabel,
             FilePath = outputPath
@@ -319,10 +407,50 @@ public sealed unsafe class IndexSnapshot : IDisposable
         return Unsafe.ReadUnaligned<IndexRecord>(lpBase + IndexFormat.HeaderSize + index * IndexFormat.RecordSize);
     }
 
-    public ReadOnlySpan<byte> GetNameSpan(IndexRecord record)
+    /// <summary>前缀长度区紧跟在记录区之后：Header 256B + Records 16B × N。</summary>
+    private long PrefixLensOffset => IndexFormat.HeaderSize + (long)EntryCount * IndexFormat.RecordSize;
+
+    public byte GetPrefixLength(int index)
     {
-        var lpBase = _lpBase;
-        return new ReadOnlySpan<byte>(lpBase + ArenaOffset + record.NameOffset, record.NameLength);
+        return Unsafe.ReadUnaligned<byte>(_lpBase + PrefixLensOffset + index);
+    }
+
+    public int BlockStartIndex(int index)
+    {
+        return index - index % IndexFormat.PrefixBlockSize;
+    }
+
+    /// <summary>条目自己的名字后缀（不含与块首名共享的前缀）。</summary>
+    public ReadOnlySpan<byte> GetSuffixSpan(int index, IndexRecord record)
+    {
+        var lpPrefixLen = (int)GetPrefixLength(index);
+        return new ReadOnlySpan<byte>(
+            _lpBase + ArenaOffset + record.NameOffset,
+            record.NameLength - lpPrefixLen);
+    }
+
+    /// <summary>块首条目的完整名字字节（块首条前缀长度为 0，所以其名字区字节就是全名）。</summary>
+    public ReadOnlySpan<byte> GetBlockStartNameSpan(int index)
+    {
+        var lpStart = BlockStartIndex(index);
+        var lpRecord = GetRecord(lpStart);
+        return new ReadOnlySpan<byte>(_lpBase + ArenaOffset + lpRecord.NameOffset, lpRecord.NameLength);
+    }
+
+    /// <summary>解码第 index 条的名字：块首名前缀 + 自己的后缀。</summary>
+    public string DecodeNameAt(int index)
+    {
+        var lpRecord = GetRecord(index);
+        var lpPrefixLen = (int)GetPrefixLength(index);
+        if (lpPrefixLen == 0)
+        {
+            return DecodeName(GetSuffixSpan(index, lpRecord));
+        }
+
+        var lpBytes = new byte[lpRecord.NameLength];
+        GetBlockStartNameSpan(index)[..lpPrefixLen].CopyTo(lpBytes);
+        GetSuffixSpan(index, lpRecord).CopyTo(lpBytes.AsSpan(lpPrefixLen));
+        return DecodeName(lpBytes);
     }
 
     public ReadOnlySpan<byte> GetArenaSpan()
@@ -339,7 +467,7 @@ public sealed unsafe class IndexSnapshot : IDisposable
         while (lpCurrent >= 0 && lpGuard++ < 256)
         {
             var lpRecord = GetRecord(lpCurrent);
-            var lpName = DecodeName(GetNameSpan(lpRecord));
+            var lpName = DecodeNameAt(lpCurrent);
             if (lpName.Length > 0)
             {
                 lpParts.Add(lpName);
@@ -394,22 +522,36 @@ public sealed unsafe class IndexSnapshot : IDisposable
         return System.Text.Encoding.UTF8.GetBytes(name);
     }
 
-    /// <summary>FileTime → Unix 秒。0 或非法值返回 0（表示未知）。</summary>
-    private static uint ToUnixSeconds(long fileTimeTicks)
+    /// <summary>
+    /// 编码文件名并保证不超过记录里 10 位的长度上限。Windows 文件名上限 255 个 UTF-16 码元，
+    /// UTF-8 字节数最多约 765，正常不会触顶；真触顶时按字符截断，避免产生半个 UTF-8 码元。
+    /// </summary>
+    private static byte[] EncodeNameCapped(string name)
     {
-        if (fileTimeTicks <= 0)
+        var lpBytes = EncodeName(name);
+        if (lpBytes.Length <= IndexFormat.MaxNameBytes)
         {
-            return 0;
+            return lpBytes;
         }
 
-        try
+        var lpLength = name.Length;
+        while (lpLength > 0 && EncodeName(name[..lpLength]).Length > IndexFormat.MaxNameBytes)
         {
-            var lpSeconds = DateTimeOffset.FromFileTime(fileTimeTicks).ToUnixTimeSeconds();
-            return (uint)Math.Clamp(lpSeconds, 0L, (long)uint.MaxValue);
+            lpLength--;
         }
-        catch (ArgumentOutOfRangeException)
+
+        return EncodeName(name[..lpLength]);
+    }
+
+    private static int CommonPrefixLength(byte[] left, byte[] right)
+    {
+        var lpMax = Math.Min(left.Length, right.Length);
+        var lpLength = 0;
+        while (lpLength < lpMax && left[lpLength] == right[lpLength])
         {
-            return 0;
+            lpLength++;
         }
+
+        return lpLength;
     }
 }

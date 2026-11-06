@@ -118,63 +118,20 @@ internal sealed class IndexService : IDisposable
 
             var lpMode = string.IsNullOrWhiteSpace(mode) ? "auto" : mode.Trim().ToLowerInvariant();
             var lpRoot = string.IsNullOrWhiteSpace(root) ? @"C:\" : root.Trim();
-            var lpVolumeLabel = ResolveVolumeLabel(lpRoot);
+            var lpVolumeLabel = IndexBuildRunner.ResolveVolumeLabel(
+                lpMode == "synthetic" ? "C:\\" : lpRoot);
             var lpOutput = AppPaths.IndexFile(lpVolumeLabel);
             Directory.CreateDirectory(AppPaths.IndexRoot);
 
-            if (lpMode == "synthetic")
-            {
-                // 压测入口：root 解析成条目数，默认 500 万。
-                var lpCount = int.TryParse(lpRoot, out var lpParsedCount) ? lpParsedCount : 5_000_000;
-                AppLog.Info($"合成索引构建开始：{lpCount} 条 -> {lpOutput}");
-                var lpSynthetic = SyntheticIndexSource.Build(lpCount, lpOutput, cancellationToken);
-                FinishBuild(lpOutput, lpSynthetic);
-                return lpSynthetic;
-            }
+            AppLog.Info($"索引构建开始（子进程）：root={lpRoot} mode={lpMode} -> {lpOutput}");
 
-            AppLog.Info($"索引构建开始：root={lpRoot} mode={lpMode} -> {lpOutput}");
-
-            if (lpMode is "usn" or "auto")
-            {
-                try
-                {
-                    using var lpSource = UsnVolumeSource.Open(lpVolumeLabel, lpVolumeLabel);
-                    var lpResult = lpSource.BuildFull(
-                        lpOutput,
-                        count => AppLog.Info($"索引进度（USN）: {count} 条"),
-                        cancellationToken);
-                    FinishBuild(lpOutput, lpResult);
-                    return lpResult;
-                }
-                catch (UsnAccessException ex)
-                {
-                    AppLog.Warn($"{ex.Message}，降级到目录遍历。");
-                    if (lpMode == "usn")
-                    {
-                        throw;
-                    }
-                }
-                catch (Exception ex) when (lpMode == "auto")
-                {
-                    AppLog.Warn($"USN 构建失败（{ex.Message}），降级到目录遍历。");
-                }
-            }
-
-            var lpWalkResult = DirectoryIndexSource.Build(
-                lpRoot,
-                lpOutput,
-                count => AppLog.Info($"索引进度（遍历）: {count} 条"),
-                cancellationToken);
-            FinishBuild(lpOutput, lpWalkResult);
-            return lpWalkResult;
+            var lpResult = IndexBuildRunner.RunInChildProcess(lpRoot, lpMode, lpOutput, cancellationToken);
+            FinishBuild(lpOutput, lpResult);
+            return lpResult;
         }
         finally
         {
             _lpBuilding = false;
-
-            // 500 万级构建会留下 1.5 GB 级的临时堆（构建期节点、名字副本）。
-            // 服务是长驻进程，构建结束后主动回收一次，避免长期霸占私有工作集。
-            GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         }
     }
 
@@ -182,7 +139,7 @@ internal sealed class IndexService : IDisposable
     {
         AppLog.Info(
             $"索引构建完成：{result.EntryCount} 条，文件 {result.FileBytes / 1024.0 / 1024.0:0.0} MB，" +
-            $"耗时 {result.BuildMs:0}ms，跳过 {result.SkippedCount}");
+            $"名字前缀编码节省 {result.NamePrefixSavedBytes / 1024.0 / 1024.0:0.0} MB，耗时 {result.BuildMs:0}ms，跳过 {result.SkippedCount}");
         Load(output);
         lock (_lpGate)
         {
@@ -198,19 +155,6 @@ internal sealed class IndexService : IDisposable
         {
             return _lpEngine?.Search(query, limit);
         }
-    }
-
-    /// <summary>C: / C:\ / C 都归一成 C；目录路径取所在卷。</summary>
-    private static string ResolveVolumeLabel(string root)
-    {
-        var lpRoot = root.Trim();
-        if (lpRoot.Length <= 3 && lpRoot.Contains(':'))
-        {
-            return char.ToUpperInvariant(lpRoot[0]).ToString();
-        }
-
-        var lpPathRoot = Path.GetPathRoot(Path.GetFullPath(lpRoot));
-        return string.IsNullOrEmpty(lpPathRoot) ? "C" : char.ToUpperInvariant(lpPathRoot[0]).ToString();
     }
 
     public void Dispose()
