@@ -273,7 +273,7 @@ public sealed partial class SettingsWindow : Window
         PageUpdate.Visibility = page == "update" ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateNavVisuals();
-        ResizeAndCenter(page is "shortcuts" or "update" ? 550 : 840, 640);
+        // 窗口尺寸固定（840×640 DIP），切页只换内容、不改变窗口大小；内容超出时由 ContentScroller 自己滚动。
         ContentScroller.ChangeView(null, 0, null, disableAnimation: true);
 
         if (page == "scope")
