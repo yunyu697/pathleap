@@ -327,9 +327,18 @@ public sealed partial class MainWindow : Window
         _lpServiceStatus = text;
         _lpServiceConnected = connected;
         ServiceStatusText.Text = text;
-        StatusDot.Fill = new SolidColorBrush(connected
+        UpdateStatusDot(connected);
+    }
+
+    /// <summary>底栏状态点：实心 5px 圆点 + 同色 11px 低透明度光晕，与设计稿对齐；颜色随连接状态变化。</summary>
+    private void UpdateStatusDot(bool connected)
+    {
+        var lpColor = connected
             ? Color.FromArgb(255, 46, 158, 107)
-            : Color.FromArgb(255, 199, 122, 24));
+            : Color.FromArgb(255, 199, 122, 24);
+        StatusDot.Fill = new SolidColorBrush(lpColor);
+        StatusGlow.Fill = new SolidColorBrush(lpColor);
+        StatusGlow.Opacity = connected ? 0.18 : 0.13;
     }
 
     private void PositionWindow()
@@ -547,9 +556,7 @@ public sealed partial class MainWindow : Window
         RefreshSelection();
         UpdateEmptyState();
         ServiceStatusText.Text = _lpLastQueryMs >= 0 ? $"{_lpLastQueryMs:0.0} ms" : _lpServiceStatus;
-        StatusDot.Fill = new SolidColorBrush(_lpServiceConnected
-            ? Color.FromArgb(255, 46, 158, 107)
-            : Color.FromArgb(255, 199, 122, 24));
+        UpdateStatusDot(_lpServiceConnected);
         if (_lpSelectedIndex >= 0)
         {
             ScrollSelectionIntoView();
@@ -575,9 +582,7 @@ public sealed partial class MainWindow : Window
         RefreshSelection();
         UpdateEmptyState();
         ServiceStatusText.Text = _lpServiceStatus;
-        StatusDot.Fill = new SolidColorBrush(_lpServiceConnected
-            ? Color.FromArgb(255, 46, 158, 107)
-            : Color.FromArgb(255, 199, 122, 24));
+        UpdateStatusDot(_lpServiceConnected);
     }
 
     private void OnRecentUpdated()
