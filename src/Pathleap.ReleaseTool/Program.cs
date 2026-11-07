@@ -68,6 +68,7 @@ internal static class Program
         Console.WriteLine($"seedBase64={lpSeedBase64}");
         Console.WriteLine("把 publicKeyBase64 填入 src/Pathleap.Shared/Update/ReleaseSigning.cs；");
         Console.WriteLine("把 seedBase64 存入发布仓库的 secret PATHLEAP_SIGNING_KEY，切勿提交到源码。");
+        Console.WriteLine("注意：发布私钥已固定，发版流程不得生成新钥；仅明确换钥时使用本命令，且必须先发布内置新公钥的客户端。");
 
         var lpOut = options.GetValueOrDefault("out-seed");
         if (!string.IsNullOrWhiteSpace(lpOut))
@@ -91,11 +92,18 @@ internal static class Program
         var lpOut = Require(options, "out");
 
         var lpSeed = ReadSeed(options);
-        var lpPublicExpected = ReleaseSigning.GetPublicKeyBase64(lpSeed);
-        if (HasEmbeddedKey() && lpPublicExpected != ReleaseSigning.PublicKeyBase64)
+        if (!HasEmbeddedKey())
         {
             throw new InvalidOperationException(
-                "签名 seed 与客户端内置公钥不匹配：发布后客户端会验签失败。请先替换 ReleaseSigning.PublicKeyBase64。");
+                "客户端未内置发布公钥（ReleaseSigning.PublicKeyBase64 为空或占位值），拒绝签名发布。");
+        }
+
+        var lpPublicExpected = ReleaseSigning.GetPublicKeyBase64(lpSeed);
+        if (lpPublicExpected != ReleaseSigning.PublicKeyBase64)
+        {
+            throw new InvalidOperationException(
+                "签名 seed 与客户端内置公钥不一致，已中止：本项目固定使用同一把发布私钥，发布流程不得临时生成新钥。"
+                + "确需换钥时必须先发布内置新公钥的客户端版本，再发布用新钥签名的清单。");
         }
 
         var lpNotesFile = options.GetValueOrDefault("notes-file");
