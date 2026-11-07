@@ -103,6 +103,13 @@ public partial class App : Application
                 _lpQuickHotkey = lpParsedQuick;
             }
 
+            // 两个唤醒热键不能撞车：Chord 完全相同时直接回退默认，避免其中一个静默失效。
+            if (_lpHotkey.SameAs(_lpQuickHotkey))
+            {
+                AppLog.Warn($"唤醒方式与快速切换热键冲突（同为 {_lpHotkey.Display}），唤醒方式回退默认 {HotkeySpec.Default.Display}");
+                _lpHotkey = HotkeySpec.Default;
+            }
+
             var lpTooltip = $"{Branding.DisplayName}（{Branding.ChineseName}） · {_lpHotkey.Display}";
             var lpStarted = await Task.Run(() => _lpNativeHost.Start(_lpHotkey, _lpQuickHotkey, lpTooltip));
             if (!lpStarted)
@@ -116,10 +123,13 @@ public partial class App : Application
             var lpScreenMode = !string.IsNullOrEmpty(Program.Startup.Screen);
             if (!_lpNativeHost.HotkeyRegistered)
             {
-                var lpMessage = $"热键 {_lpHotkey.Display} 注册失败（Win32={_lpNativeHost.HotkeyErrorCode}）。" +
-                                "请从托盘菜单打开搜索，或修改配置中的 uiHotkey。";
+                var lpMessage = _lpHotkey.IsDoubleTap
+                    ? $"双击唤醒 {_lpHotkey.Display} 不可用（Win32={_lpNativeHost.HotkeyErrorCode}）：低层键盘钩子未能安装，" +
+                      "常见于安全软件拦截或权限不足。请从托盘菜单打开搜索，或在设置「快捷键」里改用组合键。"
+                    : $"热键 {_lpHotkey.Display} 注册失败（Win32={_lpNativeHost.HotkeyErrorCode}）。" +
+                      "请从托盘菜单打开搜索，或在设置「快捷键」里换用其它预置方式。";
                 AppLog.Warn(lpMessage);
-                _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 热键不可用", lpMessage);
+                _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 唤醒方式不可用", lpMessage);
                 if (!Program.Startup.AutoBench && !lpScreenMode)
                 {
                     _lpWindow.ShowFromCommand();
@@ -248,6 +258,24 @@ public partial class App : Application
                 }
 
                 return DispatchToUiAsync(() => RunBenchmarkAsync(request.Samples));
+
+            // 自动化入口：切换唤醒方式（与设置页点击走同一条 ApplyHotkeyAsync）。
+            case "HOTKEY":
+            {
+                if (!HotkeySpec.TryParse(request.Query, out var lpSpec, out var lpSpecError))
+                {
+                    return Task.FromResult<IpcReply>(IpcReply.Failure($"唤醒方式无效: {lpSpecError}"));
+                }
+
+                return DispatchToUiAsync(async () =>
+                {
+                    await ApplyHotkeyAsync(lpSpec);
+                    var lpOk = _lpNativeHost?.HotkeyRegistered == true;
+                    return lpOk
+                        ? IpcReply.Success($"已切换到 {lpSpec.Display}")
+                        : IpcReply.Failure($"切换后未生效: {lpSpec.Display}");
+                });
+            }
 
             // 后台验证入口：等价于在搜索框输入文本并等结果回来，不注入真实键鼠。
             case "QUERY":
@@ -412,6 +440,7 @@ public partial class App : Application
 
         var lpWindow = new SettingsWindow(_lpConfig);
         lpWindow.UpdateRequested += OpenUpdate;
+        lpWindow.HotkeyRequested += spec => _ = ApplyHotkeyAsync(spec);
         lpWindow.Closed += (_, _) =>
         {
             lpWindow.PrepareShutdown();
@@ -422,6 +451,45 @@ public partial class App : Application
         lpWindow.ShowPageForTest(page);
         lpWindow.Activate();
         AppLog.Info($"设置窗已打开: page={page}");
+    }
+
+    /// <summary>
+    /// 设置页选中预置唤醒方式后立即生效：先校验与快速切换热键冲突，再在消息线程重注册；
+    /// 失败时运行态已回滚，界面与日志同时给出原因，不做静默失效。
+    /// </summary>
+    private async Task ApplyHotkeyAsync(HotkeySpec spec)
+    {
+        var lpHost = _lpNativeHost;
+        if (lpHost is null)
+        {
+            _lpSettingsWindow?.ReportHotkeyResult(spec, false, "原生消息线程尚未启动");
+            return;
+        }
+
+        if (spec.SameAs(_lpQuickHotkey))
+        {
+            var lpConflict = $"{spec.Display} 与快速切换热键 {_lpQuickHotkey.Display} 冲突，请选择其它方式";
+            AppLog.Warn(lpConflict);
+            _lpSettingsWindow?.ReportHotkeyResult(spec, false, lpConflict);
+            return;
+        }
+
+        var lpResult = await lpHost.ChangeHotkeyAsync(spec);
+        if (lpResult.Ok)
+        {
+            _lpHotkey = spec;
+            _lpConfig.UiHotkey = spec.Text;
+            ThemeService.Instance.SaveConfig();
+            lpHost.UpdateTrayTooltip($"{Branding.DisplayName}（{Branding.ChineseName}） · {spec.Display}");
+            AppLog.Info($"唤醒方式已保存: {spec.Text}");
+        }
+        else
+        {
+            AppLog.Error($"唤醒方式未生效: {spec.Display} · {lpResult.Message}");
+            lpHost.ShowTrayWarning($"{Branding.DisplayName} 唤醒方式切换失败", lpResult.Message);
+        }
+
+        _lpSettingsWindow?.ReportHotkeyResult(spec, lpResult.Ok, lpResult.Message);
     }
 
     private void OpenUpdate() => OpenUpdate(string.Empty);

@@ -6,13 +6,16 @@ namespace Pathleap.Shared.Config;
 /// </summary>
 public sealed class AppConfig
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
 
     /// <summary>产品标识，用于检测配置是否被别的产品复用。</summary>
     public string Product { get; set; } = Branding.ProductId;
 
-    /// <summary>全局唤出热键。M1 临时使用 Ctrl+Alt+Space（双击 Ctrl 需要 LL 钩子，属后续里程碑）。</summary>
-    public string UiHotkey { get; set; } = "Ctrl+Alt+Space";
+    /// <summary>
+    /// 全局唤出方式。默认双击 Ctrl（连续按两次、不叠加其它键），由低层键盘钩子判定；
+    /// 也可写成 Ctrl+Alt+Space 这类 RegisterHotKey 组合键（见设置页预置清单）。
+    /// </summary>
+    public string UiHotkey { get; set; } = "Ctrl+Ctrl";
 
     /// <summary>快速切换浮层的全局热键。默认 Ctrl+G；在文件对话框打开时唤出可直接注入路径。</summary>
     public string QuickSwitchHotkey { get; set; } = "Ctrl+G";
@@ -77,9 +80,20 @@ public sealed class AppConfig
 
     public void Normalize()
     {
+        if (SchemaVersion < 2)
+        {
+            // v2：唤醒方式默认由 Ctrl+Alt+Space 改为双击 Ctrl；用户自定义过的其它值原样保留。
+            if (string.Equals(UiHotkey, "Ctrl+Alt+Space", StringComparison.OrdinalIgnoreCase))
+            {
+                UiHotkey = "Ctrl+Ctrl";
+            }
+
+            SchemaVersion = 2;
+        }
+
         if (string.IsNullOrWhiteSpace(UiHotkey))
         {
-            UiHotkey = "Ctrl+Alt+Space";
+            UiHotkey = "Ctrl+Ctrl";
         }
 
         if (string.IsNullOrWhiteSpace(QuickSwitchHotkey))

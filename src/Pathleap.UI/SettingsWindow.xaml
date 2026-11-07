@@ -465,8 +465,20 @@
                                 <TextBlock Text="全局" Style="{StaticResource LpSectionLabelStyle}" Margin="0,22,0,6" />
                                 <Grid Margin="0,7,0,4">
                                     <TextBlock Text="唤出 / 隐藏搜索框" FontSize="12" Foreground="{ThemeResource Text2Brush}" VerticalAlignment="Center" />
-                                    <StackPanel x:Name="UiHotkeyKeys" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="UiHotkeyDisplayText"
+                                               Text="双击 Ctrl"
+                                               FontSize="12"
+                                               Foreground="{ThemeResource Text1Brush}"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center" />
                                 </Grid>
+                                <StackPanel x:Name="HotkeyPresetPanel" Spacing="6" Margin="0,4,0,0" />
+                                <TextBlock x:Name="HotkeyStatusText"
+                                           Text="预置方式选中即生效，无需重启。"
+                                           FontSize="10.5"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,7,0,0" />
                                 <Grid Margin="0,7,0,4">
                                     <TextBlock Text="快速切换浮层" FontSize="12" Foreground="{ThemeResource Text2Brush}" VerticalAlignment="Center" />
                                     <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -533,7 +545,7 @@
                                         </Grid.ColumnDefinitions>
                                         <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource Text3Brush}" VerticalAlignment="Top" />
                                         <TextBlock Grid.Column="1"
-                                                   Text="Ctrl+G 已接入：文件对话框打开时唤出浮层，选中文件夹会把路径注入对话框。标「未接入」的组合当前版本不会响应；两个热键可在 config.json 的 uiHotkey / quickSwitchHotkey 中修改。"
+                                                   Text="上方预置唤醒方式选中即生效，并写入 config.json 的 uiHotkey；双击类依赖低层键盘钩子，被安全软件拦截时会在状态行与托盘提示。鼠标中键/侧键需要额外的鼠标钩子，本版未接入。快速切换浮层为 Ctrl+G（quickSwitchHotkey），文件对话框打开时唤出并把文件夹路径注入对话框。"
                                                    FontSize="10.5"
                                                    Foreground="{ThemeResource Text3Brush}"
                                                    TextWrapping="Wrap" />

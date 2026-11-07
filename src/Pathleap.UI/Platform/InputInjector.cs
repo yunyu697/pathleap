@@ -5,6 +5,19 @@ internal static class InputInjector
 {
     public static bool SendHotkey(HotkeySpec spec)
     {
+        if (spec.IsDoubleTap)
+        {
+            // 双击类唤醒：模拟两次「按下并松开」，间隔 80 ms，落在 380 ms 判定窗口内。
+            var lpKey = (ushort)spec.TapVirtualKey;
+            if (!Send(new[] { CreateKey(lpKey, keyUp: false), CreateKey(lpKey, keyUp: true) }))
+            {
+                return false;
+            }
+
+            System.Threading.Thread.Sleep(80);
+            return Send(new[] { CreateKey(lpKey, keyUp: false), CreateKey(lpKey, keyUp: true) });
+        }
+
         var lpModifiers = spec.GetModifierVirtualKeys();
         var lpInputs = new List<NativeMethods.Input>(lpModifiers.Count * 2 + 2);
         foreach (var lpModifier in lpModifiers)

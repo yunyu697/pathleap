@@ -1,5 +1,6 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
@@ -29,6 +30,12 @@ public sealed partial class SettingsWindow : Window
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
+
+    /// <summary>用户选中某项预置唤醒方式；宿主负责实际重注册，完成后回调 <see cref="ReportHotkeyResult"/>。</summary>
+    internal event Action<HotkeySpec>? HotkeyRequested;
+
+    private readonly List<(Button Row, HotkeySpec Spec)> _lpHotkeyRows = new();
+    private static readonly SolidColorBrush FailureBrush = new(Color.FromArgb(255, 226, 132, 90));
 
     public SettingsWindow(AppConfig config)
     {
@@ -126,7 +133,7 @@ public sealed partial class SettingsWindow : Window
         Platform.WindowChrome.Apply(this, _lpTheme.WindowBorderColor, _lpTheme.IsDark);
         RootGrid.Resources["AccentBrush"] = _lpTheme.AccentBrush;
         BuildVersionDot();
-        BuildHotkeyKeys();
+        BuildHotkeyPresets();
         UpdateNavVisuals();
         UpdateThemeCardVisuals();
         UpdateAccentVisuals();
@@ -134,40 +141,122 @@ public sealed partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 按 config.json 的 uiHotkey（默认 Ctrl+Alt+Space）渲染键帽，
-    /// 不再显示设计稿里占位用的「Ctrl Ctrl 连续两次」。
+    /// 渲染预置唤醒方式清单（双击 Ctrl/Alt/Shift 与组合键）。每项都标明适用与冲突风险，
+    /// 选中后立即交给宿主重注册；鼠标中键/侧键未接入，不在这里放假开关。
     /// </summary>
-    private void BuildHotkeyKeys()
+    private void BuildHotkeyPresets()
     {
-        UiHotkeyKeys.Children.Clear();
-        var lpHotkey = string.IsNullOrWhiteSpace(_lpConfig.UiHotkey) ? "Ctrl+Alt+Space" : _lpConfig.UiHotkey;
-        var lpParts = lpHotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        for (var lpIndex = 0; lpIndex < lpParts.Length; lpIndex++)
-        {
-            if (lpIndex > 0)
-            {
-                UiHotkeyKeys.Children.Add(new TextBlock
-                {
-                    Text = "+",
-                    FontSize = 10,
-                    Foreground = _lpTheme.Text4Brush,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-            }
+        _lpHotkeyRows.Clear();
+        HotkeyPresetPanel.Children.Clear();
 
-            UiHotkeyKeys.Children.Add(new Border
+        foreach (var lpPreset in HotkeySpec.Presets)
+        {
+            var lpTitle = new TextBlock
             {
-                Style = (Style)RootGrid.Resources["LpKbdStyle"],
-                Child = new TextBlock
-                {
-                    Text = lpParts[lpIndex],
-                    FontSize = 9.5,
-                    Foreground = _lpTheme.Text2Brush,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-            });
+                Text = lpPreset.Title,
+                FontSize = 12.5,
+                Foreground = _lpTheme.Text1Brush
+            };
+            var lpTag = new TextBlock
+            {
+                Text = lpPreset.Tag,
+                FontSize = 9,
+                Foreground = _lpTheme.Text3Brush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var lpHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            lpHeader.Children.Add(lpTitle);
+            lpHeader.Children.Add(lpTag);
+
+            var lpNote = new TextBlock
+            {
+                Text = lpPreset.Note,
+                FontSize = 10,
+                Foreground = _lpTheme.Text3Brush,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 3, 0, 0)
+            };
+
+            var lpContent = new StackPanel();
+            lpContent.Children.Add(lpHeader);
+            lpContent.Children.Add(lpNote);
+
+            // 用 Button 而不是 Border：可聚焦、可被 UI 自动化 Invoke，键盘用户也能选中。
+            var lpRow = new Button
+            {
+                Background = _lpTheme.TransparentBrush,
+                BorderBrush = _lpTheme.Border1Brush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                Padding = new Thickness(11, 8, 11, 9),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                MinHeight = 0,
+                Content = lpContent,
+                Tag = lpPreset.Spec
+            };
+            AutomationProperties.SetName(lpRow, lpPreset.Spec.Text);
+            lpRow.Click += OnHotkeyPresetClicked;
+
+            _lpHotkeyRows.Add((lpRow, lpPreset.Spec));
+            HotkeyPresetPanel.Children.Add(lpRow);
         }
+
+        UpdateHotkeyPresetVisuals();
+    }
+
+    private void UpdateHotkeyPresetVisuals()
+    {
+        HotkeySpec.TryParse(_lpConfig.UiHotkey, out var lpCurrent, out _);
+        if (UiHotkeyDisplayText is not null)
+        {
+            UiHotkeyDisplayText.Text = lpCurrent.Display;
+        }
+
+        foreach (var lpItem in _lpHotkeyRows)
+        {
+            var lpSelected = string.Equals(lpItem.Spec.Text, lpCurrent.Text, StringComparison.OrdinalIgnoreCase);
+            lpItem.Row.Background = lpSelected ? _lpTheme.NavSelectedBrush : _lpTheme.TransparentBrush;
+            lpItem.Row.BorderBrush = lpSelected ? _lpTheme.AccentBrush : _lpTheme.Border1Brush;
+            lpItem.Row.BorderThickness = new Thickness(lpSelected ? 1.5 : 1);
+            if (lpItem.Row.Content is StackPanel lpContent && lpContent.Children.Count > 0
+                && lpContent.Children[0] is StackPanel lpHeader && lpHeader.Children.Count > 0
+                && lpHeader.Children[0] is TextBlock lpTitle)
+            {
+                lpTitle.Foreground = lpSelected ? _lpTheme.Text1Brush : _lpTheme.Text2Brush;
+            }
+        }
+    }
+
+    private void OnHotkeyPresetClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button lpRow || lpRow.Tag is not HotkeySpec lpSpec)
+        {
+            return;
+        }
+
+        AppLog.Info($"设置页请求切换唤醒方式: {lpSpec.Text}");
+        HotkeyStatusText.Foreground = _lpTheme.Text3Brush;
+        HotkeyStatusText.Text = $"正在应用 {lpSpec.Display}…";
+        HotkeyRequested?.Invoke(lpSpec);
+    }
+
+    /// <summary>宿主在重注册完成后回报结果；成功同步选中态，失败给出原因并指路备选方式。</summary>
+    internal void ReportHotkeyResult(HotkeySpec spec, bool ok, string message)
+    {
+        if (ok)
+        {
+            _lpConfig.UiHotkey = spec.Text;
+            UpdateHotkeyPresetVisuals();
+            HotkeyStatusText.Foreground = _lpTheme.Text3Brush;
+            HotkeyStatusText.Text = $"已生效：{spec.Display}，已写入 config.json，立即可以使用。";
+            AppLog.Info($"设置页唤醒方式已生效: {spec.Text}");
+            return;
+        }
+
+        HotkeyStatusText.Foreground = FailureBrush;
+        HotkeyStatusText.Text = $"未生效：{message}";
+        AppLog.Warn($"设置页唤醒方式未生效: {spec.Text} · {message}");
     }
 
     private void OnThemeChanged()
