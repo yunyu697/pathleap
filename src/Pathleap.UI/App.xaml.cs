@@ -23,6 +23,7 @@ public partial class App : Application
     private TrayMenuWindow? _lpTrayMenu;
     private AboutWindow? _lpAboutWindow;
     private HotkeySpec _lpHotkey = HotkeySpec.Default;
+    private HotkeySpec _lpQuickHotkey = HotkeySpec.DefaultQuick;
     private readonly CancellationTokenSource _lpCts = new();
     private readonly DateTimeOffset _lpStartedAt = DateTimeOffset.Now;
     private bool _lpBenchRunning;
@@ -90,8 +91,17 @@ public partial class App : Application
                 _lpHotkey = lpParsedHotkey;
             }
 
+            if (!HotkeySpec.TryParse(_lpConfig.QuickSwitchHotkey, out var lpParsedQuick, out var lpQuickError))
+            {
+                AppLog.Warn($"快速切换热键无效（{lpQuickError}），回退默认 {HotkeySpec.DefaultQuick.Display}");
+            }
+            else
+            {
+                _lpQuickHotkey = lpParsedQuick;
+            }
+
             var lpTooltip = $"{Branding.DisplayName}（{Branding.ChineseName}） · {_lpHotkey.Display}";
-            var lpStarted = await Task.Run(() => _lpNativeHost.Start(_lpHotkey, lpTooltip));
+            var lpStarted = await Task.Run(() => _lpNativeHost.Start(_lpHotkey, _lpQuickHotkey, lpTooltip));
             if (!lpStarted)
             {
                 AppLog.Error("原生消息线程启动超时，托盘与热键可能不可用。");
@@ -115,6 +125,14 @@ public partial class App : Application
             else if (Program.Startup.ShowOnStart && !lpScreenMode)
             {
                 _lpWindow.ShowFromCommand();
+            }
+
+            if (!_lpNativeHost.QuickHotkeyRegistered)
+            {
+                var lpQuickMessage = $"快速切换热键 {_lpQuickHotkey.Display} 注册失败（Win32={_lpNativeHost.QuickHotkeyErrorCode}），" +
+                                     "可从主窗口打开快速切换，或修改配置中的 quickSwitchHotkey。";
+                AppLog.Warn(lpQuickMessage);
+                _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 快速切换热键不可用", lpQuickMessage);
             }
 
             if (lpScreenMode)
@@ -160,6 +178,8 @@ public partial class App : Application
 
         _lpNativeHost.HotkeyPressed += tick =>
             _lpWindow?.UiDispatcher.TryEnqueue(() => _lpWindow.ShowFromHotkey(tick));
+
+        _lpNativeHost.QuickHotkeyPressed += () => Dispatch(OpenQuickSwitch);
 
         _lpNativeHost.ShowRequested += () => Dispatch(() => _lpWindow?.ShowFromCommand());
 
@@ -432,6 +452,9 @@ public partial class App : Application
 
     private void OpenQuickSwitch()
     {
+        // 必须赶在浮层抢前台之前记录对话框；Ctrl+G 触发时前台仍是用户的打开/保存对话框。
+        var lpDialog = FileDialogInjector.CaptureActive();
+
         if (_lpQuickWindow is null)
         {
             var lpWindow = new QuickSwitchWindow(_lpConfig);
@@ -443,8 +466,16 @@ public partial class App : Application
             _lpQuickWindow = lpWindow;
         }
 
-        _lpQuickWindow.ShowAtCursor();
-        AppLog.Info("快速切换浮层已打开");
+        _lpQuickWindow.ShowAtCursor(lpDialog);
+        AppLog.Info(lpDialog.IsFileDialog
+            ? $"快速切换浮层已打开（对话框={lpDialog.Kind}，title={lpDialog.Title}）"
+            : "快速切换浮层已打开（未检测到文件对话框）");
+
+        if (Program.Startup.QuickPick > 0)
+        {
+            var lpPick = Program.Startup.QuickPick - 1;
+            _lpQuickWindow.DispatcherQueue.TryEnqueue(() => _lpQuickWindow.PickForTest(lpPick));
+        }
     }
 
     private void OpenAbout()

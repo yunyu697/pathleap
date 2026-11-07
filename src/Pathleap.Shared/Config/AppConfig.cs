@@ -14,6 +14,9 @@ public sealed class AppConfig
     /// <summary>全局唤出热键。M1 临时使用 Ctrl+Alt+Space（双击 Ctrl 需要 LL 钩子，属后续里程碑）。</summary>
     public string UiHotkey { get; set; } = "Ctrl+Alt+Space";
 
+    /// <summary>快速切换浮层的全局热键。默认 Ctrl+G；在文件对话框打开时唤出可直接注入路径。</summary>
+    public string QuickSwitchHotkey { get; set; } = "Ctrl+G";
+
     /// <summary>UI 启动时若服务管道不可用，是否自动拉起服务控制台进程（开发期便利，M2 由 SCM 接管）。</summary>
     public bool StartServiceWithUi { get; set; } = true;
 
@@ -77,6 +80,11 @@ public sealed class AppConfig
         if (string.IsNullOrWhiteSpace(UiHotkey))
         {
             UiHotkey = "Ctrl+Alt+Space";
+        }
+
+        if (string.IsNullOrWhiteSpace(QuickSwitchHotkey))
+        {
+            QuickSwitchHotkey = "Ctrl+G";
         }
 
         WindowWidth = Math.Clamp(WindowWidth, 560, 900);

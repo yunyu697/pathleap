@@ -18,6 +18,7 @@ internal static class NativeMethods
     public const int WmRButtonUp = 0x0205;
 
     public const int HotkeyId = 1;
+    public const int QuickHotkeyId = 2;
 
     public const uint ModAlt = 0x0001;
     public const uint ModControl = 0x0002;

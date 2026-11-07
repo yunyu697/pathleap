@@ -473,7 +473,7 @@
                                         <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="Ctrl" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
                                         <TextBlock Text="+" FontSize="10" Foreground="{ThemeResource Text4Brush}" VerticalAlignment="Center" />
                                         <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="G" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
-                                        <TextBlock Text="未接入" FontSize="9.5" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
+                                        <TextBlock Text="已接入" FontSize="9.5" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
 
@@ -533,7 +533,7 @@
                                         </Grid.ColumnDefinitions>
                                         <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource Text3Brush}" VerticalAlignment="Top" />
                                         <TextBlock Grid.Column="1"
-                                                   Text="标为「未接入」的组合当前版本不会响应；唤出热键可在 config.json 的 uiHotkey 中修改。"
+                                                   Text="Ctrl+G 已接入：文件对话框打开时唤出浮层，选中文件夹会把路径注入对话框。标「未接入」的组合当前版本不会响应；两个热键可在 config.json 的 uiHotkey / quickSwitchHotkey 中修改。"
                                                    FontSize="10.5"
                                                    Foreground="{ThemeResource Text3Brush}"
                                                    TextWrapping="Wrap" />

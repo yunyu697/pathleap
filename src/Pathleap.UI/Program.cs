@@ -29,6 +29,9 @@ internal sealed class StartupOptions
     /// <summary>截图/调试用：--query=文本，配合 --screen=results 直接填入搜索框。</summary>
     public string Query { get; set; } = string.Empty;
 
+    /// <summary>自动化用：--quick-pick=N，配合 --screen=quick 在浮层打开后直接选第 N 行（1 起）。</summary>
+    public int QuickPick { get; set; }
+
     /// <summary>由计划任务拉起的实例：真实参数从 pending 文件恢复，避免循环提权。</summary>
     public bool ElevatedLaunch { get; set; }
 
@@ -48,6 +51,13 @@ internal sealed class StartupOptions
             if (lpArg.StartsWith("--query=", StringComparison.OrdinalIgnoreCase))
             {
                 lpOptions.Query = lpArg["--query=".Length..];
+                continue;
+            }
+
+            if (lpArg.StartsWith("--quick-pick=", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(lpArg["--quick-pick=".Length..], out var lpQuickPick))
+            {
+                lpOptions.QuickPick = lpQuickPick;
                 continue;
             }
 

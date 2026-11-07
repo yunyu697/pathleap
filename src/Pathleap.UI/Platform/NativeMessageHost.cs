@@ -28,6 +28,9 @@ internal sealed class NativeMessageHost : IDisposable
 
     public event Action<long>? HotkeyPressed;
 
+    /// <summary>快速切换热键（默认 Ctrl+G）按下；该热键在文件对话框打开时用于注入路径。</summary>
+    public event Action? QuickHotkeyPressed;
+
     public event Action? ShowRequested;
 
     /// <summary>托盘右键：把菜单交给 UI 线程绘制（设计稿的 5 项菜单），参数为屏幕坐标。</summary>
@@ -39,11 +42,18 @@ internal sealed class NativeMessageHost : IDisposable
 
     public int HotkeyErrorCode { get; private set; }
 
+    public HotkeySpec QuickHotkey { get; private set; } = HotkeySpec.DefaultQuick;
+
+    public bool QuickHotkeyRegistered { get; private set; }
+
+    public int QuickHotkeyErrorCode { get; private set; }
+
     public bool TrayAvailable => _lpTray?.Added ?? false;
 
-    public bool Start(HotkeySpec hotkey, string trayTooltip)
+    public bool Start(HotkeySpec hotkey, HotkeySpec quickHotkey, string trayTooltip)
     {
         Hotkey = hotkey;
+        QuickHotkey = quickHotkey;
         _lpThread = new Thread(() => ThreadMain(trayTooltip))
         {
             IsBackground = true,
@@ -111,6 +121,23 @@ internal sealed class NativeMessageHost : IDisposable
                 AppLog.Info($"全局热键注册成功: {Hotkey.Display}");
             }
 
+            QuickHotkeyRegistered = NativeMethods.RegisterHotKey(
+                _lpHwnd,
+                NativeMethods.QuickHotkeyId,
+                QuickHotkey.Modifiers | NativeMethods.ModNoRepeat,
+                QuickHotkey.VirtualKey);
+            if (!QuickHotkeyRegistered)
+            {
+                QuickHotkeyErrorCode = Marshal.GetLastWin32Error();
+                AppLog.Warn(
+                    $"快速切换热键注册失败: {QuickHotkey.Display}（Win32={QuickHotkeyErrorCode}" +
+                    (QuickHotkeyErrorCode == NativeMethods.ErrorHotkeyAlreadyRegistered ? " 已被其它程序占用" : string.Empty) + "）");
+            }
+            else
+            {
+                AppLog.Info($"快速切换热键注册成功: {QuickHotkey.Display}");
+            }
+
             _lpTray = new NotifyIconHandle(_lpHwnd, trayTooltip);
             _lpTray.Add(showWarningIfFailed: false);
             if (_lpTray.Added)
@@ -136,6 +163,7 @@ internal sealed class NativeMessageHost : IDisposable
             if (_lpHwnd != IntPtr.Zero)
             {
                 NativeMethods.UnregisterHotKey(_lpHwnd, NativeMethods.HotkeyId);
+                NativeMethods.UnregisterHotKey(_lpHwnd, NativeMethods.QuickHotkeyId);
                 NativeMethods.DestroyWindow(_lpHwnd);
                 _lpHwnd = IntPtr.Zero;
             }
@@ -171,6 +199,13 @@ internal sealed class NativeMessageHost : IDisposable
                     var lpTick = Stopwatch.GetTimestamp();
                     AppLog.Debug($"WM_HOTKEY 到达 t={lpTick}f");
                     HotkeyPressed?.Invoke(lpTick);
+                    return IntPtr.Zero;
+                }
+
+                if ((int)wParam == NativeMethods.QuickHotkeyId)
+                {
+                    AppLog.Debug($"快速切换热键到达: {QuickHotkey.Display}");
+                    QuickHotkeyPressed?.Invoke();
                     return IntPtr.Zero;
                 }
 

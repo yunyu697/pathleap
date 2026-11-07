@@ -19,8 +19,8 @@ namespace Pathleap.UI;
 
 /// <summary>
 /// 快速切换浮层（设计稿屏 2）：行首 1–6 直选，绿点标出「当前」文件夹。
-/// 说明：真正的打开/保存对话框注入尚未接入，所以表头常驻「预览 · 未接入打开/保存对话框」徽标；
-/// 列表内容与跳转都是真实的——最近打开过的文件夹，回车/数字键直接在资源管理器打开。
+/// 打开时若前台是标准文件对话框（#32770 的打开/另存为/选择文件夹），选中文件夹会把路径注入该对话框；
+/// 否则退回资源管理器打开。页脚徽标如实显示当前是「注入模式」还是「未检测到对话框」。
 /// </summary>
 public sealed partial class QuickSwitchWindow : Window
 {
@@ -29,6 +29,7 @@ public sealed partial class QuickSwitchWindow : Window
 
     private readonly AppConfig _lpConfig;
     private readonly List<QuickFolder> _lpFolders = new();
+    private FileDialogInfo _lpDialog = FileDialogInfo.None;
     private bool _lpAllowClose;
 
     private readonly record struct QuickFolder(string Name, string Path, bool IsCurrent);
@@ -448,12 +449,31 @@ public sealed partial class QuickSwitchWindow : Window
         }
     }
 
-    public void ShowAtCursor()
+    public void ShowAtCursor(FileDialogInfo dialog)
     {
+        _lpDialog = dialog;
+        UpdateDialogBadge();
         PositionAndSize();
         AppWindow.Show();
         Activate();
+        Platform.ForegroundWindow.ForceActivate(this);
+        // 强制前台之后再走一次 WinUI 激活，让 XAML 岛进入 Active 状态，键盘事件才会路由到 KeySink。
+        Activate();
         KeySink.Focus(FocusState.Programmatic);
+    }
+
+    private void UpdateDialogBadge()
+    {
+        if (_lpDialog.IsFileDialog)
+        {
+            PreviewBadgeText.Text = $"对话框：{_lpDialog.Kind} · 将注入路径";
+            PreviewBadgeText.Foreground = ThemeService.Instance.AccentBrush;
+        }
+        else
+        {
+            PreviewBadgeText.Text = "未检测到文件对话框";
+            PreviewBadgeText.Foreground = ThemeService.Instance.Text4Brush;
+        }
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs e)
@@ -503,6 +523,9 @@ public sealed partial class QuickSwitchWindow : Window
         }
     }
 
+    /// <summary>截图/自动化用：直接触发第 index 行（0 起），等价于按数字键。</summary>
+    internal void PickForTest(int index) => OpenFolder(index);
+
     private void OpenFolder(int index)
     {
         if (index < 0 || index >= _lpFolders.Count)
@@ -511,15 +534,43 @@ public sealed partial class QuickSwitchWindow : Window
         }
 
         var lpFolder = _lpFolders[index];
+        var lpDialog = _lpDialog;
+        AppWindow.Hide();
+
+        if (lpDialog.IsFileDialog)
+        {
+            // 注入放到后台线程：先等对话框重新拿到前台，再写文件名框并回车。
+            var lpPath = lpFolder.Path;
+            Task.Run(() =>
+            {
+                Thread.Sleep(80);
+                var lpOk = FileDialogInjector.TryInject(lpDialog.Handle, lpPath);
+                if (lpOk)
+                {
+                    AppLog.Info($"快速切换已注入文件对话框: {lpPath}");
+                }
+                else
+                {
+                    AppLog.Warn($"快速切换注入失败，回退为资源管理器打开: {lpPath}");
+                    OpenInExplorer(lpPath);
+                }
+            });
+            return;
+        }
+
+        OpenInExplorer(lpFolder.Path);
+        AppLog.Info($"快速切换打开文件夹: {lpFolder.Path}");
+    }
+
+    private static void OpenInExplorer(string path)
+    {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{lpFolder.Path}\"") { UseShellExecute = true });
-            AppLog.Info($"快速切换打开文件夹: {lpFolder.Path}");
-            AppWindow.Hide();
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
         }
         catch (Exception ex)
         {
-            AppLog.Warn($"快速切换打开失败: {ex.Message}");
+            AppLog.Warn($"资源管理器打开失败: {ex.Message}");
         }
     }
 

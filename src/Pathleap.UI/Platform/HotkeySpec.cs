@@ -23,6 +23,12 @@ internal sealed class HotkeySpec
         0x20,
         "Ctrl+Alt+Space");
 
+    /// <summary>快速切换浮层默认热键 Ctrl+G。</summary>
+    public static HotkeySpec DefaultQuick { get; } = new(
+        NativeMethods.ModControl,
+        0x47,
+        "Ctrl+G");
+
     public static bool TryParse(string? text, out HotkeySpec spec, out string error)
     {
         spec = Default;
