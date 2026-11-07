@@ -17,11 +17,18 @@
     <!-- 使用自建 Program.Main，才能在任何 WinUI 初始化之前完成单实例判定 -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <StartupObject>Pathleap.UI.Program</StartupObject>
-    <ApplicationIcon />
+    <ApplicationIcon>Assets\Pathleap.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 同一份图形：嵌入 exe 资源（资源管理器/安装包/快捷方式用），并复制到输出目录（窗口图标用）。 -->
+    <Content Include="Assets\Pathleap.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>

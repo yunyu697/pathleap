@@ -77,6 +77,7 @@ public partial class App : Application
             ThemeService.Instance.Load(_lpConfig, AppPaths.ConfigFile);
 
             _lpWindow = new MainWindow(_lpConfig);
+            AppIcons.Apply(_lpWindow);
             _lpWindow.SettingsRequested += OpenSettings;
             _lpWindow.QuickSwitchRequested += OpenQuickSwitch;
             _lpWindow.UpdateRequested += OpenUpdate;
@@ -439,6 +440,7 @@ public partial class App : Application
         }
 
         var lpWindow = new SettingsWindow(_lpConfig);
+        AppIcons.Apply(lpWindow);
         lpWindow.UpdateRequested += OpenUpdate;
         lpWindow.HotkeyRequested += spec => _ = ApplyHotkeyAsync(spec);
         lpWindow.Closed += (_, _) =>
@@ -508,6 +510,7 @@ public partial class App : Application
         }
 
         var lpWindow = new UpdateWindow(_lpConfig);
+        AppIcons.Apply(lpWindow);
         lpWindow.Closed += (_, _) =>
         {
             lpWindow.PrepareShutdown();
@@ -582,6 +585,7 @@ public partial class App : Application
         }
 
         var lpWindow = new QuickSwitchWindow(_lpConfig);
+        AppIcons.Apply(lpWindow);
         _lpQuickBars[dialog.Handle] = lpWindow;
         lpWindow.KeyboardEnded += () =>
             Dispatch(() =>
@@ -767,6 +771,7 @@ public partial class App : Application
         }
 
         var lpWindow = new AboutWindow();
+        AppIcons.Apply(lpWindow);
         lpWindow.Closed += (_, _) => _lpAboutWindow = null;
         _lpAboutWindow = lpWindow;
         lpWindow.Activate();

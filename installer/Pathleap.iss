@@ -63,6 +63,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName=Pathleap {#AppVersion}
 UninstallDisplayIcon={app}\Pathleap.UI.exe
+; 安装包/卸载器自身也用产品图标：与 exe 内嵌的是同一份 .ico。
+SetupIconFile=..\src\Pathleap.UI\Assets\Pathleap.ico
 VersionInfoVersion={#AppNumericVersion}
 VersionInfoProductName=Pathleap
 VersionInfoDescription=Pathleap Setup
@@ -87,9 +89,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Pathleap"; Filename: "{app}\Pathleap.UI.exe"; WorkingDir: "{app}"; Comment: "Pathleap 快速定位"
-Name: "{group}\卸载 Pathleap"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Pathleap"; Filename: "{app}\Pathleap.UI.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Pathleap"; Filename: "{app}\Pathleap.UI.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Pathleap.UI.exe"; Comment: "Pathleap 快速定位"
+Name: "{group}\卸载 Pathleap"; Filename: "{uninstallexe}"; IconFilename: "{app}\Pathleap.UI.exe"
+Name: "{autodesktop}\Pathleap"; Filename: "{app}\Pathleap.UI.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Pathleap.UI.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Pathleap.UI.exe"; Description: "{cm:LaunchProgram,Pathleap}"; Flags: nowait postinstall skipifsilent runasoriginaluser

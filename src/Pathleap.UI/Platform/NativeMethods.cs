@@ -46,6 +46,10 @@ internal static class NativeMethods
 
     public const int IdiApplication = 32512;
 
+    public const uint ImageIcon = 1;
+    public const uint LrLoadFromFile = 0x00000010;
+    public const uint LrDefaultSize = 0x00000040;
+
     public const uint KeyeventfKeyUp = 0x0002;
     public const uint InputKeyboard = 1;
 
@@ -291,6 +295,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern IntPtr LoadIconW(IntPtr instance, IntPtr iconName);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr LoadImageW(IntPtr instance, string name, uint type, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr icon);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern uint ExtractIconExW(string file, int index, IntPtr[]? large, IntPtr[]? small, uint count);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr CreatePopupMenu();

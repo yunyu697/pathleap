@@ -672,11 +672,13 @@ internal sealed class NativeMessageHost : IDisposable
         private readonly string _lpTip;
         private readonly object _lpGate = new();
         private NativeMethods.NotifyIconData _lpData;
+        private IntPtr _lpIcon;
 
         public NotifyIconHandle(IntPtr hwnd, string tip)
         {
             _lpHwnd = hwnd;
             _lpTip = tip.Length > 120 ? tip[..120] : tip;
+            _lpIcon = AppIcons.LoadTrayIcon();
             _lpData = new NativeMethods.NotifyIconData
             {
                 Size = Marshal.SizeOf<NativeMethods.NotifyIconData>(),
@@ -684,7 +686,7 @@ internal sealed class NativeMessageHost : IDisposable
                 Id = TrayIconId,
                 Flags = NativeMethods.NifMessage | NativeMethods.NifIcon | NativeMethods.NifTip,
                 CallbackMessage = NativeMethods.WmTrayCallback,
-                Icon = NativeMethods.LoadIconW(IntPtr.Zero, new IntPtr(NativeMethods.IdiApplication)),
+                Icon = _lpIcon,
                 Tip = _lpTip,
                 Info = string.Empty,
                 InfoTitle = string.Empty
@@ -750,14 +752,15 @@ internal sealed class NativeMessageHost : IDisposable
         {
             lock (_lpGate)
             {
-                if (!Added)
+                if (Added)
                 {
-                    return;
+                    var lpData = _lpData;
+                    NativeMethods.Shell_NotifyIconW(NativeMethods.NimDelete, ref lpData);
+                    Added = false;
                 }
 
-                var lpData = _lpData;
-                NativeMethods.Shell_NotifyIconW(NativeMethods.NimDelete, ref lpData);
-                Added = false;
+                AppIcons.ReleaseIcon(_lpIcon);
+                _lpIcon = IntPtr.Zero;
             }
         }
     }
