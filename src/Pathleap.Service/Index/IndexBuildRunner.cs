@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Index;
 
 namespace Pathleap.Service.Index;
@@ -13,7 +14,12 @@ namespace Pathleap.Service.Index;
 /// </summary>
 internal static class IndexBuildRunner
 {
-    public static IndexBuildResult Run(string root, string mode, string output, CancellationToken cancellationToken)
+    public static IndexBuildResult Run(
+        string root,
+        string mode,
+        string output,
+        Action<IndexBuildProgress>? progress,
+        CancellationToken cancellationToken)
     {
         var lpMode = string.IsNullOrWhiteSpace(mode) ? "auto" : mode.Trim().ToLowerInvariant();
         var lpRoot = string.IsNullOrWhiteSpace(root) ? @"C:\" : root.Trim();
@@ -22,7 +28,7 @@ internal static class IndexBuildRunner
         {
             // 压测入口：root 解析成条目数，默认 500 万。
             var lpCount = int.TryParse(lpRoot, out var lpParsedCount) ? lpParsedCount : 5_000_000;
-            return SyntheticIndexSource.Build(lpCount, output, cancellationToken);
+            return SyntheticIndexSource.Build(lpCount, output, progress, cancellationToken);
         }
 
         if (lpMode is "usn" or "auto")
@@ -31,19 +37,25 @@ internal static class IndexBuildRunner
             {
                 var lpVolumeLabel = ResolveVolumeLabel(lpRoot);
                 using var lpSource = UsnVolumeSource.Open(lpVolumeLabel, lpVolumeLabel);
-                return lpSource.BuildFull(output, static _ => { }, cancellationToken);
+                return lpSource.BuildFull(output, progress, cancellationToken);
             }
-            catch (UsnAccessException) when (lpMode == "auto")
+            catch (Exception ex) when (lpMode == "auto")
             {
-                // 非管理员/服务身份拿不到卷句柄：自动降级到目录遍历。
-            }
-            catch (Exception) when (lpMode == "auto")
-            {
-                // auto 模式任何 USN 失败都降级，保证索引可用。
+                // auto 模式：非管理员/服务身份拿不到卷句柄，降级目录遍历，并把原因带回给上层展示。
+                var lpReason = ex is UsnAccessException
+                    ? "权限不足（需要管理员或服务身份）"
+                    : ex.Message;
+                var lpWarning = $"USN 主路径不可用：{lpReason}；已降级为目录遍历";
+                AppLog.Warn(lpWarning);
+                // 先上报一次降级说明，UI 在扫描过程中就能看到「已降级」，不必等构建结束。
+                progress?.Invoke(new IndexBuildProgress { Phase = "scan", Warning = lpWarning });
+                var lpResult = DirectoryIndexSource.Build(lpRoot, output, progress, cancellationToken);
+                lpResult.Warning = lpWarning;
+                return lpResult;
             }
         }
 
-        return DirectoryIndexSource.Build(lpRoot, output, static _ => { }, cancellationToken);
+        return DirectoryIndexSource.Build(lpRoot, output, progress, cancellationToken);
     }
 
     /// <summary>C: / C:\ / C 都归一成 C；目录路径取所在卷。</summary>
@@ -59,11 +71,15 @@ internal static class IndexBuildRunner
         return string.IsNullOrEmpty(lpPathRoot) ? "C" : char.ToUpperInvariant(lpPathRoot[0]).ToString();
     }
 
-    /// <summary>在服务进程外跑一次构建，返回子进程落盘的构建摘要。</summary>
+    /// <summary>
+    /// 在服务进程外跑一次构建，返回子进程落盘的构建摘要。
+    /// 进度由子进程写进 <c>&lt;output&gt;.progress.json</c>，这里轮询后回调给服务门面。
+    /// </summary>
     public static IndexBuildResult RunInChildProcess(
         string root,
         string mode,
         string output,
+        Action<IndexBuildProgress>? progress,
         CancellationToken cancellationToken)
     {
         var lpExe = Environment.ProcessPath;
@@ -73,7 +89,11 @@ internal static class IndexBuildRunner
         }
 
         var lpResultFile = output + ".result.json";
+        var lpProgressFile = output + ".progress.json";
+        var lpFailFile = output + ".fail.txt";
         TryDelete(lpResultFile);
+        TryDelete(lpProgressFile);
+        TryDelete(lpFailFile);
 
         var lpStartInfo = new ProcessStartInfo(lpExe)
         {
@@ -89,6 +109,7 @@ internal static class IndexBuildRunner
         using var lpProcess = new Process { StartInfo = lpStartInfo };
         lpProcess.Start();
 
+        var lpLastProgressWrite = DateTime.MinValue;
         while (!lpProcess.WaitForExit(200))
         {
             if (cancellationToken.IsCancellationRequested)
@@ -96,11 +117,17 @@ internal static class IndexBuildRunner
                 TryKill(lpProcess);
                 throw new OperationCanceledException(cancellationToken);
             }
+
+            ForwardProgress(lpProgressFile, progress, ref lpLastProgressWrite);
         }
 
         if (lpProcess.ExitCode != 0)
         {
-            throw new InvalidOperationException($"索引构建子进程退出码 {lpProcess.ExitCode}");
+            var lpReason = TryReadText(lpFailFile);
+            throw new InvalidOperationException(
+                lpReason.Length > 0
+                    ? $"索引构建子进程失败：{lpReason}"
+                    : $"索引构建子进程退出码 {lpProcess.ExitCode}");
         }
 
         if (!File.Exists(lpResultFile))
@@ -117,7 +144,61 @@ internal static class IndexBuildRunner
 
         // 子进程已把自身构建耗时写进摘要（含节点生成与落盘），进程启动开销可以忽略，直接沿用。
         TryDelete(lpResultFile);
+        TryDelete(lpProgressFile);
+        TryDelete(lpFailFile);
         return lpResult;
+    }
+
+    /// <summary>读取子进程写出的进度文件；内容没更新就跳过，避免每 200ms 重复解析。</summary>
+    private static void ForwardProgress(
+        string progressFile,
+        Action<IndexBuildProgress>? progress,
+        ref DateTime lastWrite)
+    {
+        if (progress is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!File.Exists(progressFile))
+            {
+                return;
+            }
+
+            var lpWriteTime = File.GetLastWriteTimeUtc(progressFile);
+            if (lpWriteTime <= lastWrite)
+            {
+                return;
+            }
+
+            var lpJson = File.ReadAllText(progressFile);
+            var lpParsed = System.Text.Json.JsonSerializer.Deserialize<IndexBuildProgress>(lpJson);
+            if (lpParsed is null)
+            {
+                return;
+            }
+
+            lastWrite = lpWriteTime;
+            progress(lpParsed);
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            // 子进程正在写进度文件时可能读到半截 JSON，下一轮再读即可。
+        }
+    }
+
+    private static string TryReadText(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : string.Empty;
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
     }
 
     private static void TryDelete(string path)

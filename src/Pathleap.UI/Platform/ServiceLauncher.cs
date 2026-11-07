@@ -101,9 +101,11 @@ internal sealed class ServiceLauncher : IDisposable
 
     private static string DescribeSource(string source) => source switch
     {
-        "usn" => "USN 全量索引",
-        "walk" => "目录遍历索引",
         "" => "来源未知",
+        _ when source.Equals("usn", StringComparison.OrdinalIgnoreCase)
+              || source.StartsWith("usn:", StringComparison.OrdinalIgnoreCase) => "USN 全量索引",
+        _ when source.Equals("walk", StringComparison.OrdinalIgnoreCase)
+              || source.StartsWith("walk:", StringComparison.OrdinalIgnoreCase) => "目录遍历索引",
         _ when source.StartsWith("synthetic", StringComparison.OrdinalIgnoreCase) => "合成索引（性能测试数据）",
         _ => source
     };

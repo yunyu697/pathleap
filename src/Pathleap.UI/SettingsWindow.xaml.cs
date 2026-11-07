@@ -588,7 +588,9 @@ public sealed partial class SettingsWindow : Window
                 Branding.ServicePipeName,
                 new IpcRequest { Command = "INDEX_BUILD", Root = string.Empty, Mode = "auto" },
                 TimeSpan.FromSeconds(10));
-            IndexFootText.Text = lpReply.Ok ? "重建请求已受理，正在扫描…" : $"重建失败：{lpReply.Message}";
+            IndexFootText.Text = lpReply.Ok
+                ? "重建请求已受理，正在扫描…"
+                : $"未重新开始：{lpReply.Message}";
             StartIndexPolling();
         }
         catch (Exception ex)
@@ -630,7 +632,8 @@ public sealed partial class SettingsWindow : Window
             StatStateText.Text = lpStatus.State switch
             {
                 "ready" => "就绪",
-                "building" => "构建中",
+                "building" => lpStatus.Percent >= 0 ? $"构建中 {lpStatus.Percent:0}%" : "构建中",
+                "error" => "失败",
                 _ => "未建"
             };
 
@@ -638,18 +641,38 @@ public sealed partial class SettingsWindow : Window
                 ? $"由后台服务提供 · {FormatCount(lpStatus.EntryCount)} 项"
                 : "由后台服务提供 · 索引尚未建立";
 
-            IndexFootText.Text = lpStatus.Loaded
-                ? $"来源 {DescribeSource(lpStatus.Source)} · 载入 {lpStatus.LoadMs:0} ms · {lpStatus.Note}"
-                : "索引尚未建立；可点击右侧「重建索引」开始扫描。";
+            if (lpStatus.State == "building")
+            {
+                IndexFootText.Text = $"构建中 · {DescribeBuildProgress(lpStatus)} · {lpStatus.Note}";
+            }
+            else if (lpStatus.State == "error")
+            {
+                IndexFootText.Text = $"{lpStatus.Note}（{lpStatus.Warning}）";
+            }
+            else
+            {
+                IndexFootText.Text = lpStatus.Loaded
+                    ? $"来源 {DescribeSource(lpStatus.Source)} · 载入 {lpStatus.LoadMs:0} ms · {lpStatus.Note}" +
+                      (string.IsNullOrEmpty(lpStatus.Warning) ? string.Empty : $" · {lpStatus.Warning}")
+                    : "索引尚未建立；启动后会自动构建，也可点击右侧「重建索引」。";
+            }
 
+            var lpTrackWidth = (IndexProgressFill.Parent as FrameworkElement)?.ActualWidth ?? 0;
             IndexProgressFill.Width = lpStatus.State == "building"
-                ? Math.Max(28, RootGrid.ActualWidth * 0.04)
+                ? lpStatus.Percent >= 0
+                    ? Math.Max(2, lpTrackWidth * lpStatus.Percent / 100)
+                    : Math.Max(28, lpTrackWidth * 0.04)
                 : 0;
 
             BuildIndexChips(lpStatus);
             BuildExcludeChips();
 
-            if (lpStatus.State != "building" && _lpIndexBusy)
+            // 自动构建没有经过「重建索引」按钮，这里按状态自行续上轮询，构建结束再停。
+            if (lpStatus.State == "building")
+            {
+                StartIndexPolling();
+            }
+            else
             {
                 _lpIndexBusy = false;
                 RebuildButton.IsEnabled = true;
@@ -673,6 +696,14 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    private static string DescribeBuildProgress(IndexStatusDto status)
+    {
+        var lpPercent = status.Percent >= 0 ? $"{status.Percent:0.#}%，" : string.Empty;
+        return status.Phase == "write"
+            ? $"{lpPercent}正在写入 {status.Scanned:N0} 条"
+            : $"{lpPercent}已扫描 {status.Scanned:N0} 条";
+    }
+
     private static string DescribeSource(string source)
     {
         if (string.IsNullOrWhiteSpace(source))
@@ -685,7 +716,17 @@ public sealed partial class SettingsWindow : Window
             return "合成索引（性能测试数据）";
         }
 
-        return source == "usn" ? "USN 全量索引" : source == "walk" ? "目录遍历索引" : source;
+        if (source.StartsWith("usn:", StringComparison.OrdinalIgnoreCase) || source == "usn")
+        {
+            return "USN 全量索引";
+        }
+
+        if (source.StartsWith("walk:", StringComparison.OrdinalIgnoreCase) || source == "walk")
+        {
+            return "目录遍历索引";
+        }
+
+        return source;
     }
 
     private void BuildExcludeChips()

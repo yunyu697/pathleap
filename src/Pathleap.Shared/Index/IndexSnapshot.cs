@@ -177,6 +177,30 @@ public sealed class IndexBuildResult
     public string Source { get; set; } = string.Empty;
 
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>构建过程中的降级或告警说明（例如无卷句柄权限已降级目录遍历），空串表示无。</summary>
+    public string Warning { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 构建进度。子进程按节流节奏写进 <c>&lt;output&gt;.progress.json</c>，服务进程轮询后转成 INDEX_STATUS 上报，
+/// UI 据此显示「已扫描条目 / 百分比 / 当前阶段」。
+/// </summary>
+public sealed class IndexBuildProgress
+{
+    /// <summary>scan（枚举中）/ write（排序并落盘中）。</summary>
+    public string Phase { get; set; } = "scan";
+
+    public int Scanned { get; set; }
+
+    /// <summary>预计总量；0 表示未知（USN 与目录遍历都拿不到确切总数）。</summary>
+    public int Total { get; set; }
+
+    /// <summary>0–100；负数表示总量未知。</summary>
+    public double Percent { get; set; } = -1;
+
+    /// <summary>构建过程中的降级说明（如 USN 无权限已改走目录遍历），空串表示无。</summary>
+    public string Warning { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -337,7 +361,9 @@ public sealed unsafe class IndexSnapshot : IDisposable
             lpStream.Flush(flushToDisk: true);
         }
 
-        File.Move(lpTemp, outputPath, overwrite: true);
+        // 构建期间服务进程仍映射着同路径的旧索引，Windows 不允许删除已被映射的文件：
+        // 服务收到 write 阶段进度后会主动释放映射，这里再做有界重试，避免两侧时序竞争。
+        ReplaceFile(lpTemp, outputPath);
 
         var lpTotalMs = buildMs + (System.Diagnostics.Stopwatch.GetTimestamp() - lpStartedTicks) * 1000.0
             / System.Diagnostics.Stopwatch.Frequency;
@@ -553,5 +579,24 @@ public sealed unsafe class IndexSnapshot : IDisposable
         }
 
         return lpLength;
+    }
+
+    /// <summary>把临时文件替换成正式索引；目标被别的进程映射时最多重试 15 秒。</summary>
+    private static void ReplaceFile(string tempPath, string outputPath)
+    {
+        var lpDeadline = System.Diagnostics.Stopwatch.GetTimestamp()
+                         + System.Diagnostics.Stopwatch.Frequency * 15L;
+        while (true)
+        {
+            try
+            {
+                File.Move(tempPath, outputPath, overwrite: true);
+                return;
+            }
+            catch (IOException) when (System.Diagnostics.Stopwatch.GetTimestamp() < lpDeadline)
+            {
+                Thread.Sleep(250);
+            }
+        }
     }
 }

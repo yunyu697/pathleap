@@ -12,7 +12,7 @@ public static class DirectoryIndexSource
     public static IndexBuildResult Build(
         string rootPath,
         string outputPath,
-        Action<int>? progress,
+        Action<IndexBuildProgress>? progress,
         CancellationToken cancellationToken,
         int progressStep = 50_000)
     {
@@ -108,7 +108,7 @@ public static class DirectoryIndexSource
 
                     if (lpBuilder.Count % progressStep == 0)
                     {
-                        progress?.Invoke(lpBuilder.Count);
+                        progress?.Invoke(new IndexBuildProgress { Phase = "scan", Scanned = lpBuilder.Count });
                     }
                 }
                 catch (Exception ex)
@@ -119,11 +119,13 @@ public static class DirectoryIndexSource
             }
         }
 
-        progress?.Invoke(lpBuilder.Count);
+        progress?.Invoke(new IndexBuildProgress { Phase = "scan", Scanned = lpBuilder.Count });
         var lpBuildMs = (Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / Stopwatch.Frequency;
         var lpSource = $"walk:{lpRootFull}";
         AppLog.Info($"目录遍历完成：{lpBuilder.Count} 条，跳过 {lpSkipped}，耗时 {lpBuildMs:0}ms");
 
+        // 落盘阶段（排序 + 序列化 + 写盘）不再有逐条进度，只报总量与阶段，便于 UI 说明「正在写入索引」。
+        progress?.Invoke(new IndexBuildProgress { Phase = "write", Scanned = lpBuilder.Count });
         return lpBuilder.Save(outputPath, lpSource, lpSkipped, lpBuildMs);
     }
 }

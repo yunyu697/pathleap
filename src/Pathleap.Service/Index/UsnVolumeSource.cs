@@ -63,7 +63,7 @@ internal sealed class UsnVolumeSource : IDisposable
     /// <summary>全量枚举：边读边加入构建器，最后统一解析父链并落盘。</summary>
     public IndexBuildResult BuildFull(
         string outputPath,
-        Action<int>? progress,
+        Action<IndexBuildProgress>? progress,
         CancellationToken cancellationToken,
         int progressStep = 100_000)
     {
@@ -152,7 +152,7 @@ internal sealed class UsnVolumeSource : IDisposable
 
             if (lpBuilder.Count % progressStep == 0)
             {
-                progress?.Invoke(lpBuilder.Count);
+                progress?.Invoke(new IndexBuildProgress { Phase = "scan", Scanned = lpBuilder.Count });
             }
 
             if (lpBatches > MaxEnumBatches)
@@ -166,7 +166,7 @@ internal sealed class UsnVolumeSource : IDisposable
         lpBuilder.ResolveParents(lpRootFrn, lpRootIndex);
         var lpBuildMs = (Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / Stopwatch.Frequency;
         AppLog.Info($"USN 全量枚举完成：{lpRecords} 条，跳过 {lpSkipped}，{lpBatches} 批，耗时 {lpBuildMs:0}ms");
-        progress?.Invoke(lpBuilder.Count);
+        progress?.Invoke(new IndexBuildProgress { Phase = "write", Scanned = lpBuilder.Count });
 
         return lpBuilder.Save(outputPath, $"usn:{_lpVolume}", lpSkipped, lpBuildMs);
     }

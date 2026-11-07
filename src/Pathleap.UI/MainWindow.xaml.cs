@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private const int ForegroundRetryDelayMs = 120;
     private const int ForegroundRetryAttempts = 2;
     private const int SearchDebounceMs = 120;
+    private const int IndexPollMs = 1000;
     private const int SearchLimit = 24;
     private const int PageStep = 6;
 
@@ -55,6 +56,8 @@ public sealed partial class MainWindow : Window
     private bool _lpServiceConnected;
     private string _lpServiceStatus = "正在连接索引服务…";
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpForegroundRetry;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpIndexPoll;
+    private IndexStatusDto? _lpIndexStatus;
 
     /// <summary>设置 / 快速切换 / 检查更新 / 关于由 App 接管（避免窗口互相直接引用）。</summary>
     public event Action? SettingsRequested;
@@ -224,6 +227,7 @@ public sealed partial class MainWindow : Window
         NativeMethods.SetForegroundWindow(_lpHwnd);
         SearchBox.Focus(FocusState.Programmatic);
         AppLog.Debug("搜索窗已显示并请求焦点");
+        StartIndexPolling();
         ScheduleForegroundRetry(_lpVisibleSession, ForegroundRetryAttempts);
     }
 
@@ -309,6 +313,7 @@ public sealed partial class MainWindow : Window
     {
         _lpForegroundRetry?.Stop();
         _lpForegroundRetry = null;
+        _lpIndexPoll?.Stop();
         if (_lpVisible)
         {
             _lpVisible = false;
@@ -339,6 +344,97 @@ public sealed partial class MainWindow : Window
         StatusDot.Fill = new SolidColorBrush(lpColor);
         StatusGlow.Fill = new SolidColorBrush(lpColor);
         StatusGlow.Opacity = connected ? 0.18 : 0.13;
+    }
+
+    /// <summary>窗口可见期间每秒取一次 INDEX_STATUS：构建中显示已扫描条目，就绪或失败后停掉轮询。</summary>
+    private void StartIndexPolling()
+    {
+        _lpIndexPoll ??= CreateIndexPollTimer();
+        _lpIndexPoll.Start();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateIndexPollTimer()
+    {
+        var lpTimer = _lpDispatcher.CreateTimer();
+        lpTimer.Interval = TimeSpan.FromMilliseconds(IndexPollMs);
+        lpTimer.IsRepeating = true;
+        lpTimer.Tick += async (_, _) => await PollIndexStatusAsync();
+        return lpTimer;
+    }
+
+    private async Task PollIndexStatusAsync()
+    {
+        try
+        {
+            var lpReply = await PipeClient.SendAsync(
+                Branding.ServicePipeName,
+                new IpcRequest { Command = "INDEX_STATUS" },
+                TimeSpan.FromSeconds(2));
+            if (!lpReply.Ok || lpReply.Index is null)
+            {
+                return;
+            }
+
+            ApplyIndexStatus(lpReply.Index);
+            if (lpReply.Index.State != "building")
+            {
+                _lpIndexPoll?.Stop();
+            }
+        }
+        catch (Exception ex)
+        {
+            // 服务未连接时不再空转，下次唤出窗口会重新开始轮询。
+            AppLog.Debug($"索引状态轮询失败: {ex.Message}");
+            _lpIndexPoll?.Stop();
+        }
+    }
+
+    private void ApplyIndexStatus(IndexStatusDto status)
+    {
+        var lpWasBuilding = _lpIndexStatus?.State == "building";
+        _lpIndexStatus = status;
+        _lpServiceConnected = status.State is "ready" or "building";
+        switch (status.State)
+        {
+            case "building":
+                SetServiceStatus("索引构建中 · " + DescribeBuildProgress(status), false);
+                if (_lpHomeMode && _lpRows.Count == 0)
+                {
+                    ShowEmpty("\uE895", "索引正在构建", DescribeBuildProgress(status) + "；完成后自动可搜");
+                }
+
+                break;
+
+            case "ready":
+                SetServiceStatus(
+                    $"索引就绪 · {status.EntryCount:N0} 条" +
+                    (string.IsNullOrEmpty(status.Warning) ? string.Empty : " · 降级模式"),
+                    true);
+                if (_lpHomeMode && _lpRows.Count == 0)
+                {
+                    UpdateEmptyState();
+                }
+
+                // 构建期搜到的结果是上一次索引的，构建一完成就用当前关键词重搜一遍。
+                if (lpWasBuilding && SearchBox.Text.Length > 0)
+                {
+                    ScheduleSearch();
+                }
+
+                break;
+
+            case "error":
+                SetServiceStatus("索引不可用 · 打开设置查看原因", false);
+                break;
+        }
+    }
+
+    private static string DescribeBuildProgress(IndexStatusDto status)
+    {
+        var lpPercent = status.Percent >= 0 ? $"{status.Percent:0.#}%，" : string.Empty;
+        return status.Phase == "write"
+            ? $"{lpPercent}正在写入 {status.Scanned:N0} 条"
+            : $"{lpPercent}已扫描 {status.Scanned:N0} 条";
     }
 
     private void PositionWindow()
@@ -504,7 +600,19 @@ public sealed partial class MainWindow : Window
             if (!lpReply.Ok)
             {
                 ApplyResults(null);
-                ShowEmpty("\uE783", "索引尚未就绪", lpReply.Message);
+                if (lpReply.Index is { State: "building" } lpBuilding)
+                {
+                    // 冷启动/写入索引阶段暂无可搜快照：显示构建进度，而不是只说「尚未就绪」。
+                    _lpIndexStatus = lpBuilding;
+                    ShowEmpty("\uE895", "索引正在构建", lpReply.Message);
+                    SetServiceStatus("索引构建中 · " + DescribeBuildProgress(lpBuilding), false);
+                    StartIndexPolling();
+                }
+                else
+                {
+                    ShowEmpty("\uE783", "索引尚未就绪", lpReply.Message);
+                }
+
                 return lpReply;
             }
 
@@ -514,6 +622,14 @@ public sealed partial class MainWindow : Window
             if (_lpRows.Count == 0)
             {
                 ShowEmpty("\uE721", "没有匹配的结果", "试试更短的关键词，或文件名中的一段");
+            }
+
+            if (lpReply.Index is { State: "building" } lpBuildingStatus)
+            {
+                // 旧索引仍在服务查询：结果可用，但要在底栏说明「构建中」，并继续刷新进度。
+                _lpIndexStatus = lpBuildingStatus;
+                SetServiceStatus($"索引构建中 · 结果来自上一次索引（{lpBuildingStatus.EntryCount:N0} 条）", false);
+                StartIndexPolling();
             }
 
             return lpReply;

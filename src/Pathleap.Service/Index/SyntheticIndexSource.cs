@@ -23,7 +23,11 @@ internal static class SyntheticIndexSource
         ".txt", ".docx", ".xlsx", ".png", ".jpg", ".mp4", ".zip", ".json", ".cs", ".dll", ".pdf", ".md"
     ];
 
-    public static IndexBuildResult Build(int entryCount, string outputPath, CancellationToken cancellationToken)
+    public static IndexBuildResult Build(
+        int entryCount,
+        string outputPath,
+        Action<IndexBuildProgress>? progress,
+        CancellationToken cancellationToken)
     {
         var lpStarted = Stopwatch.GetTimestamp();
         var lpBuilder = new IndexBuilder();
@@ -52,6 +56,13 @@ internal static class SyntheticIndexSource
             if ((lpI & 0xFFFF) == 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                progress?.Invoke(new IndexBuildProgress
+                {
+                    Phase = "scan",
+                    Scanned = lpBuilder.Count,
+                    Total = entryCount,
+                    Percent = entryCount <= 0 ? -1 : Math.Round(lpBuilder.Count * 100.0 / entryCount, 1)
+                });
             }
 
             var lpWord = Words[lpI % Words.Length];
@@ -64,6 +75,14 @@ internal static class SyntheticIndexSource
 
         var lpNodeMs = (Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / Stopwatch.Frequency;
         AppLog.Info($"合成索引节点生成完成：{lpBuilder.Count} 条，{lpNodeMs:0}ms");
+
+        progress?.Invoke(new IndexBuildProgress
+        {
+            Phase = "write",
+            Scanned = lpBuilder.Count,
+            Total = lpBuilder.Count,
+            Percent = 100
+        });
 
         var lpResult = lpBuilder.Save(outputPath, $"synthetic:{lpBuilder.Count}", 0, lpNodeMs);
         lpResult.BuildMs = Math.Round((Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / Stopwatch.Frequency, 1);
