@@ -155,6 +155,8 @@ public sealed partial class UpdateWindow : Window
         HomeButton.Visibility = Visibility.Visible;
         CheckButton.Visibility = Visibility.Visible;
         CheckButton.IsEnabled = !_lpBusy;
+        // 设计稿：空闲态「检查更新」是主按钮；发现新版本后降级为次按钮。
+        CheckButton.Style = (Style)RootGrid.Resources["LpPrimaryButtonStyle"];
         DownloadOnlyButton.Visibility = Visibility.Collapsed;
         UpdateButton.Visibility = Visibility.Collapsed;
         OpenFolderButton.Visibility = Visibility.Collapsed;
@@ -191,12 +193,13 @@ public sealed partial class UpdateWindow : Window
         HomeButton.Visibility = Visibility.Visible;
         CheckButton.Visibility = Visibility.Visible;
         CheckButton.IsEnabled = true;
+        CheckButton.Style = (Style)RootGrid.Resources["LpGhostButtonStyle"];
 
         var lpCanDownload = info.HasUpdate && !string.IsNullOrEmpty(info.AssetUrl);
         DownloadOnlyButton.Visibility = info.HasUpdate ? Visibility.Visible : Visibility.Collapsed;
         UpdateButton.Visibility = info.HasUpdate ? Visibility.Visible : Visibility.Collapsed;
-        DownloadOnlyButton.IsEnabled = lpCanDownload && !_lpPreview;
-        UpdateButton.IsEnabled = lpCanDownload && !_lpPreview;
+        DownloadOnlyButton.IsEnabled = lpCanDownload;
+        UpdateButton.IsEnabled = lpCanDownload;
         OpenFolderButton.Visibility = Visibility.Collapsed;
         InstallButton.Visibility = Visibility.Collapsed;
         ResizeAndCenter();
@@ -394,8 +397,6 @@ public sealed partial class UpdateWindow : Window
                 _lpInfo = lpSample;
                 ShowFound(lpSample);
                 AssetInfoText.Text = "预览数据：正式检查会读取 GitHub 最新 Release。";
-                DownloadOnlyButton.IsEnabled = false;
-                UpdateButton.IsEnabled = false;
                 break;
             case "downloading":
                 _lpInfo = lpSample;
@@ -409,7 +410,6 @@ public sealed partial class UpdateWindow : Window
                 _lpInfo = lpSample;
                 ShowDownloaded(Path.Combine(AppPaths.UpdatesRoot, lpSample.AssetName));
                 DownloadedFileDetail.Text = $"{AppPaths.UpdatesRoot} · {FormatBytes(lpSample.AssetSize)}";
-                InstallButton.IsEnabled = false;
                 break;
             default:
                 ShowIdle("预览状态：检查逻辑会真实请求 GitHub API。");
@@ -448,11 +448,23 @@ public sealed partial class UpdateWindow : Window
 
     private void OnUpdateClick(object sender, RoutedEventArgs e)
     {
+        if (_lpPreview)
+        {
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会请求 GitHub Release 资源。";
+            return;
+        }
+
         _ = DownloadAsync(installAfter: true);
     }
 
     private void OnDownloadOnlyClick(object sender, RoutedEventArgs e)
     {
+        if (_lpPreview)
+        {
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会请求 GitHub Release 资源。";
+            return;
+        }
+
         _ = DownloadAsync(installAfter: false);
     }
 
@@ -473,6 +485,12 @@ public sealed partial class UpdateWindow : Window
 
     private void OnInstallClick(object sender, RoutedEventArgs e)
     {
+        if (_lpPreview)
+        {
+            DownloadedFileDetail.Text = "预览状态：没有真实安装包；正式下载完成后此按钮会启动安装程序。";
+            return;
+        }
+
         if (!string.IsNullOrEmpty(_lpDownloadedPath))
         {
             InstallAsync(_lpDownloadedPath);

@@ -118,10 +118,48 @@ public sealed partial class SettingsWindow : Window
         Platform.WindowChrome.Apply(this, _lpTheme.WindowBorderColor, _lpTheme.IsDark);
         RootGrid.Resources["AccentBrush"] = _lpTheme.AccentBrush;
         BuildVersionDot();
+        BuildHotkeyKeys();
         UpdateNavVisuals();
         UpdateThemeCardVisuals();
         UpdateAccentVisuals();
         UpdateDensityVisuals();
+    }
+
+    /// <summary>
+    /// 按 config.json 的 uiHotkey（默认 Ctrl+Alt+Space）渲染键帽，
+    /// 不再显示设计稿里占位用的「Ctrl Ctrl 连续两次」。
+    /// </summary>
+    private void BuildHotkeyKeys()
+    {
+        UiHotkeyKeys.Children.Clear();
+        var lpHotkey = string.IsNullOrWhiteSpace(_lpConfig.UiHotkey) ? "Ctrl+Alt+Space" : _lpConfig.UiHotkey;
+        var lpParts = lpHotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var lpIndex = 0; lpIndex < lpParts.Length; lpIndex++)
+        {
+            if (lpIndex > 0)
+            {
+                UiHotkeyKeys.Children.Add(new TextBlock
+                {
+                    Text = "+",
+                    FontSize = 10,
+                    Foreground = _lpTheme.Text4Brush,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            UiHotkeyKeys.Children.Add(new Border
+            {
+                Style = (Style)RootGrid.Resources["LpKbdStyle"],
+                Child = new TextBlock
+                {
+                    Text = lpParts[lpIndex],
+                    FontSize = 9.5,
+                    Foreground = _lpTheme.Text2Brush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            });
+        }
     }
 
     private void OnThemeChanged()

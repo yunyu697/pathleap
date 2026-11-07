@@ -465,11 +465,7 @@
                                 <TextBlock Text="全局" Style="{StaticResource LpSectionLabelStyle}" Margin="0,22,0,6" />
                                 <Grid Margin="0,7,0,4">
                                     <TextBlock Text="唤出 / 隐藏搜索框" FontSize="12" Foreground="{ThemeResource Text2Brush}" VerticalAlignment="Center" />
-                                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                        <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="Ctrl" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
-                                        <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="Ctrl" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
-                                        <TextBlock Text="连续两次" FontSize="10" Foreground="{ThemeResource Text4Brush}" VerticalAlignment="Center" />
-                                    </StackPanel>
+                                    <StackPanel x:Name="UiHotkeyKeys" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                 </Grid>
                                 <Grid Margin="0,7,0,4">
                                     <TextBlock Text="快速切换浮层" FontSize="12" Foreground="{ThemeResource Text2Brush}" VerticalAlignment="Center" />
@@ -788,7 +784,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="下载镜像" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
-                                        <TextBlock Text="当前只提供 GitHub 官方源，镜像未接入" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
+                                        <TextBlock Text="当前仅 GitHub 官方源" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                     <Button Grid.Column="1" Style="{StaticResource LpSelectButtonStyle}" VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal" Spacing="5">

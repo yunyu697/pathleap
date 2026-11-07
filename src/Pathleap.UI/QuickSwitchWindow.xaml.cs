@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,8 +28,18 @@ public sealed partial class QuickSwitchWindow : Window
     private const int RowHeight = 44;
 
     private readonly AppConfig _lpConfig;
-    private readonly List<RecentEntry> _lpFolders = new();
+    private readonly List<QuickFolder> _lpFolders = new();
     private bool _lpAllowClose;
+
+    private readonly record struct QuickFolder(string Name, string Path, bool IsCurrent);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     public QuickSwitchWindow(AppConfig config)
     {
@@ -84,12 +95,39 @@ public sealed partial class QuickSwitchWindow : Window
     private void LoadFolders()
     {
         _lpFolders.Clear();
+        EmptyHintText.Visibility = Visibility.Collapsed;
+
+        // 优先列出真实打开的资源管理器窗口；最上层的那个窗口就是「当前」文件夹。
+        var lpOpen = ReadExplorerWindows();
+        if (lpOpen.Count > 0)
+        {
+            foreach (var lpItem in lpOpen)
+            {
+                _lpFolders.Add(new QuickFolder(lpItem.Name, lpItem.Path, lpItem.IsCurrent));
+            }
+
+            // 把「当前」文件夹提到第一行，保证它一定在 6 行可见范围内且默认选中。
+            var lpCurrentIndex = _lpFolders.FindIndex(lpFolder => lpFolder.IsCurrent);
+            if (lpCurrentIndex > 0)
+            {
+                var lpCurrent = _lpFolders[lpCurrentIndex];
+                _lpFolders.RemoveAt(lpCurrentIndex);
+                _lpFolders.Insert(0, lpCurrent);
+            }
+
+            SubtitleText.Text = "已打开的文件夹";
+            return;
+        }
+
         var lpRecent = RecentStore.RecentFolders(MaxRows).ToList();
         if (lpRecent.Count > 0)
         {
-            _lpFolders.AddRange(lpRecent);
+            foreach (var lpEntry in lpRecent)
+            {
+                _lpFolders.Add(new QuickFolder(lpEntry.Name, lpEntry.Path, false));
+            }
+
             SubtitleText.Text = "最近打开的文件夹";
-            EmptyHintText.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -105,17 +143,123 @@ public sealed partial class QuickSwitchWindow : Window
         {
             if (Directory.Exists(lpCandidate))
             {
-                _lpFolders.Add(new RecentEntry
-                {
-                    Name = Path.GetFileName(lpCandidate.TrimEnd('\\')) is { Length: > 0 } lpLeaf ? lpLeaf : lpCandidate,
-                    Path = lpCandidate,
-                    IsDirectory = true
-                });
+                var lpLeaf = Path.GetFileName(lpCandidate.TrimEnd('\\'));
+                _lpFolders.Add(new QuickFolder(
+                    string.IsNullOrEmpty(lpLeaf) ? lpCandidate : lpLeaf,
+                    lpCandidate,
+                    false));
             }
         }
 
         SubtitleText.Text = "常用位置（尚无打开记录）";
         EmptyHintText.Visibility = _lpFolders.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// 读取资源管理器窗口列表（Shell.Application COM）。返回的 IsCurrent 只在
+    /// 该窗口就是前台窗口时为 true；拿不到前台窗口时不伪造「当前」。
+    /// </summary>
+    private List<(string Name, string Path, bool IsCurrent)> ReadExplorerWindows()
+    {
+        var lpResult = new List<(string, string, bool)>();
+        try
+        {
+            var lpShellType = Type.GetTypeFromProgID("Shell.Application");
+            if (lpShellType is null)
+            {
+                AppLog.Warn("未找到 Shell.Application ProgID，跳过打开窗口检测。");
+                return lpResult;
+            }
+
+            dynamic lpShell = Activator.CreateInstance(lpShellType)!;
+            dynamic lpWindows = lpShell.Windows();
+            var lpCount = (int)lpWindows.Count;
+
+            var lpFound = new List<(string Name, string Path, int Hwnd)>();
+            for (var lpIndex = 0; lpIndex < lpCount; lpIndex++)
+            {
+                try
+                {
+                    dynamic lpWindow = lpWindows.Item(lpIndex);
+                    var lpUrl = (string)lpWindow.LocationURL;
+                    var lpHwnd = (int)lpWindow.HWND;
+
+                    if (string.IsNullOrEmpty(lpUrl) || !lpUrl.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var lpPath = new Uri(lpUrl).LocalPath;
+                    if (!Directory.Exists(lpPath))
+                    {
+                        continue;
+                    }
+
+                    var lpLeaf = Path.GetFileName(lpPath.TrimEnd('\\'));
+                    lpFound.Add((
+                        string.IsNullOrEmpty(lpLeaf) ? lpPath : lpLeaf,
+                        lpPath,
+                        lpHwnd));
+                }
+                catch (Exception ex)
+                {
+                    // 单个窗口读取失败不影响其余条目。
+                    AppLog.Warn($"读取单个资源管理器窗口失败: {ex.Message}");
+                }
+            }
+
+            // 只按「Shell 窗口集合内」的 Z 序判定当前，避免把不可见/未列出的窗口当成当前。
+            var lpCandidates = new HashSet<IntPtr>(lpFound.Select(lpItem => (IntPtr)lpItem.Hwnd));
+            var lpActive = FindTopExplorerWindow(lpCandidates);
+            AppLog.Debug($"快速切换：Shell 窗口 {lpCount} 个，可列出 {lpFound.Count} 个，最上层 {lpActive}");
+
+            // 当前文件夹可能排在集合末尾，先提到最前，保证它不会被 6 行上限裁掉。
+            var lpActiveIndex = lpActive == IntPtr.Zero
+                ? -1
+                : lpFound.FindIndex(lpItem => lpItem.Hwnd == (int)lpActive);
+            if (lpActiveIndex > 0)
+            {
+                var lpActiveItem = lpFound[lpActiveIndex];
+                lpFound.RemoveAt(lpActiveIndex);
+                lpFound.Insert(0, lpActiveItem);
+            }
+
+            foreach (var lpItem in lpFound)
+            {
+                if (lpResult.Count >= MaxRows)
+                {
+                    break;
+                }
+
+                lpResult.Add((lpItem.Name, lpItem.Path, lpItem.Hwnd == (int)lpActive && lpActive != IntPtr.Zero));
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"读取资源管理器窗口失败: {ex.Message}");
+        }
+
+        return lpResult;
+    }
+
+    /// <summary>
+    /// EnumWindows 按 Z 序从上到下枚举，第一个可见的资源管理器顶层窗口
+    /// （CabinetWClass）就是用户最后一次交互的文件夹窗口。
+    /// </summary>
+    private static IntPtr FindTopExplorerWindow(HashSet<IntPtr> candidates)
+    {
+        var lpFound = IntPtr.Zero;
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd) || !candidates.Contains(hWnd))
+            {
+                return true;
+            }
+
+            lpFound = hWnd;
+            return false;
+        }, IntPtr.Zero);
+        return lpFound;
     }
 
     private void OnRecentUpdated()
@@ -127,14 +271,15 @@ public sealed partial class QuickSwitchWindow : Window
     private void BuildRows()
     {
         RowsPanel.Children.Clear();
-        CountText.Text = $"{_lpFolders.Count} 个窗口";
+        var lpUnit = SubtitleText.Text.StartsWith("常用位置", StringComparison.Ordinal) ? "个常用位置" : "个窗口";
+        CountText.Text = $"{_lpFolders.Count} {lpUnit}";
         for (var lpIndex = 0; lpIndex < Math.Min(MaxRows, _lpFolders.Count); lpIndex++)
         {
             RowsPanel.Children.Add(BuildRow(lpIndex, _lpFolders[lpIndex]));
         }
     }
 
-    private Border BuildRow(int index, RecentEntry folder)
+    private Border BuildRow(int index, QuickFolder folder)
     {
         var lpSelected = index == 0;
         var lpRow = new Border
@@ -214,29 +359,38 @@ public sealed partial class QuickSwitchWindow : Window
         Grid.SetColumn(lpIconBorder, 1);
         lpGrid.Children.Add(lpTexts);
 
-        // 绿点「当前」：只有真实最近记录的第一项才标记，常用位置不会伪造当前状态。
-        if (lpSelected && !SubtitleText.Text.StartsWith("常用位置", StringComparison.Ordinal))
+        // 绿点「当前」只在真实检测到前台资源管理器窗口时显示，常用位置/最近记录不伪造。
+        if (folder.IsCurrent)
         {
-            var lpCurrent = new StackPanel
+            var lpCurrent = new Border
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 5,
+                Padding = new Thickness(6, 2, 6, 2),
+                CornerRadius = new CornerRadius(9),
+                Background = ThemeService.Instance.TrackOffBrush,
+                BorderBrush = ThemeService.Instance.TrackOffBorderBrush,
+                BorderThickness = new Thickness(1),
                 VerticalAlignment = VerticalAlignment.Center
             };
-            lpCurrent.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
+            var lpCurrentPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4
+            };
+            lpCurrentPanel.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse
             {
                 Width = 4,
                 Height = 4,
                 Fill = new SolidColorBrush(Color.FromArgb(255, 46, 158, 107)),
                 VerticalAlignment = VerticalAlignment.Center
             });
-            lpCurrent.Children.Add(new TextBlock
+            lpCurrentPanel.Children.Add(new TextBlock
             {
                 Text = "当前",
                 FontSize = 9,
                 Foreground = ThemeService.Instance.Text2Brush,
                 VerticalAlignment = VerticalAlignment.Center
             });
+            lpCurrent.Child = lpCurrentPanel;
             Grid.SetColumn(lpCurrent, 3);
             lpGrid.Children.Add(lpCurrent);
         }
