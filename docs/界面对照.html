@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pathleap 界面对照 · 设计稿 vs 实机</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#161922; --panel-2:#1b1f2a; --line:#262b38;
+    --text:#e7ebf3; --text-2:#a8b1c4; --text-3:#6f7a90;
+    --accent:#3d6ef7; --green:#2e9e6b; --amber:#c9902f; --red:#d9536f;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei UI",system-ui,-apple-system,sans-serif;
+    font-size:14px;line-height:1.6}
+  body{max-width:1320px;margin:0 auto;padding:48px 28px 80px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
+  .kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:30px;line-height:1.25;margin:10px 0 8px;letter-spacing:-.01em}
+  .sub{color:var(--text-2);max-width:900px}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+  .chip{font-size:11.5px;color:var(--text-2);border:1px solid var(--line);
+    background:var(--panel);padding:5px 10px;border-radius:999px}
+  .chip b{color:var(--text);font-weight:600}
+
+  nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 40px}
+  nav.toc a{color:var(--text-2);text-decoration:none;font-size:12.5px;
+    border:1px solid var(--line);padding:6px 11px;border-radius:8px;background:var(--panel)}
+  nav.toc a:hover{color:var(--text);border-color:#3a4358}
+
+  section{margin:0 0 56px}
+  h2{font-size:19px;margin:0 0 6px;letter-spacing:-.01em}
+  .lead{color:var(--text-2);margin:0 0 20px;max-width:920px}
+  .screen-tag{display:inline-block;font-size:10.5px;letter-spacing:.12em;color:var(--text-3);
+    text-transform:uppercase;margin-bottom:6px}
+
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  .pane{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .pane .cap{display:flex;justify-content:space-between;align-items:center;
+    padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--text-2)}
+  .pane .cap b{color:var(--text);font-weight:600}
+  .pane .frame{background:#0b0d12;padding:14px;display:flex;justify-content:center}
+  .pane img{max-width:100%;max-height:520px;display:block;border-radius:8px}
+
+  table{width:100%;border-collapse:collapse;margin-top:18px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line);font-size:12.5px}
+  th{background:var(--panel-2);color:var(--text-2);font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td:first-child{color:var(--text-3);white-space:nowrap}
+  .status{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .ok{color:#9ff0c6;background:rgba(46,158,107,.16);border:1px solid rgba(46,158,107,.35)}
+  .part{color:#ffd79a;background:rgba(201,144,47,.14);border:1px solid rgba(201,144,47,.35)}
+  .diff{color:#f4b8c4;background:rgba(217,83,111,.13);border:1px solid rgba(217,83,111,.35)}
+  .na{color:#c3cad9;background:rgba(255,255,255,.06);border:1px solid var(--line)}
+
+  .border-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}
+  .zoom{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .zoom .cap{padding:9px 13px;border-bottom:1px solid var(--line);font-size:12px;color:var(--text-2)}
+  .zoom img{width:100%;display:block;image-rendering:pixelated}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:12px;
+    background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+  .callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;
+    border-radius:0 10px 10px 0;color:var(--text-2);margin:18px 0}
+  .callout b{color:var(--text)}
+  .warn{border-left-color:var(--amber)}
+  footer{border-top:1px solid var(--line);padding-top:20px;color:var(--text-3);font-size:12px}
+  @media (max-width:900px){.compare,.border-grid{grid-template-columns:1fr}body{padding:32px 18px 60px}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="kicker">Pathleap · UI Fidelity Review</div>
+  <h1>五屏设计稿 vs 实机截图</h1>
+  <p class="sub">逐屏并排对照，列出差异项与处理状态。设计稿基准为 <code>docs/design-reference.html</code>；实机截图位于 <code>docs/shots/</code>。本页不把未验证项写成已完成。</p>
+  <div class="meta">
+    <span class="chip">版本 <b>1.0.1</b></span>
+    <span class="chip">本机缩放 <b>200%</b></span>
+    <span class="chip">对照 <b>12 组</b></span>
+    <span class="chip">截图 <b>01–17</b></span>
+    <span class="chip">采集后段 <b>工作站锁屏</b></span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#main-recent">主窗 · 最近访问</a>
+  <a href="#main-results">主窗 · 搜索结果</a>
+  <a href="#quick">快速切换浮层</a>
+  <a href="#appearance">设置 · 外观与主题</a>
+  <a href="#shortcuts">设置 · 快捷键</a>
+  <a href="#scope">设置 · 搜索范围</a>
+  <a href="#settings-update">设置 · 更新</a>
+  <a href="#update-idle">更新 · 空闲</a>
+  <a href="#update-found">更新 · 发现新版本</a>
+  <a href="#update-downloading">更新 · 下载中</a>
+  <a href="#update-downloaded">更新 · 仅下载完成</a>
+  <a href="#tray">托盘菜单</a>
+  <a href="#border">边框专项</a>
+  <a href="#status">验证状态</a>
+</nav>
+
+<div class="callout warn">
+  <b>截图通道说明：</b>主窗与浅色主题（01/02/04/06/14/15）用 <code>CopyFromScreen</code> 采集，忠实包含 DWM 边框与阴影；
+  之后工作站锁屏，桌面截图只能得到锁屏画面，故 03/05/07/08–13 改用 <code>PrintWindow</code> 抓取客户区内容。
+  PrintWindow 不经过 DWM 合成，非客户区边框会绘制成 1px 系统白线——那是通道伪影，<b>不用于边框层数判断</b>。
+</div>
+
+<!-- 1 -->
+<section id="main-recent">
+  <div class="screen-tag">Screen 1 · Empty state</div>
+  <h2>主搜索窗口 · 最近访问首页</h2>
+  <p class="lead">空输入时建立「最近访问」心智：同样的行结构、时间戳与底部键位提示。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-main-recent.png</b></span><span>660 × 436</span></div>
+      <div class="frame"><img src="shots/D-main-recent.png" alt="设计稿：最近访问" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>01-main-recent.png</b></span><span>CopyFromScreen · 200%</span></div>
+      <div class="frame"><img src="shots/01-main-recent.png" alt="实机：最近访问" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>最近访问列表：图标 / 名称 / 路径 / 时间</td><td>同一套行模板，按时间倒序</td><td>本机无历史记录，截图呈空态引导文案</td><td><span class="status part">部分（内容依赖真实使用）</span></td></tr>
+    <tr><td>2</td><td>底部常驻键盘提示</td><td>↑↓ 选择、↵ 打开、Esc 隐藏，右侧索引状态</td><td>设计稿另有 Tab 切换范围；功能未接入，不放假键位</td><td><span class="status diff">已知差异（诚实省略）</span></td></tr>
+    <tr><td>3</td><td>1px 描边、圆角 14</td><td>DWM 单层描边；系统圆角约 8</td><td>圆角小于设计稿</td><td><span class="status diff">已知差异</span></td></tr>
+  </table>
+</section>
+
+<!-- 2 -->
+<section id="main-results">
+  <div class="screen-tag">Screen 1 · Query state</div>
+  <h2>主搜索窗口 · 输入态</h2>
+  <p class="lead">行顺序固定为 图标 → 高亮匹配片段 → 路径 → 来源标签；选中行有底色，行尾是 ↵ 键帽。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-main-results.png</b></span><span>660 × 436</span></div>
+      <div class="frame"><img src="shots/D-main-results.png" alt="设计稿：搜索结果" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>02-main-results.png</b></span><span>CopyFromScreen · query=report</span></div>
+      <div class="frame"><img src="shots/02-main-results.png" alt="实机：搜索结果" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>行顺序：图标 → 高亮 → 路径 → 来源标签</td><td>完全一致，匹配片段为强调色底</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>选中行底色 + 行尾 ↵ 键帽</td><td>强调色渐变底 + 1px 高亮描边；标签右侧 ↵</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>3</td><td>来源标签：文件 / 文件夹 / 程序</td><td>同名标签 + 按类型着色图标</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>4</td><td>底部键位提示</td><td>↑↓ 选择 / ↵ 打开 / Esc 隐藏</td><td>Tab 切换范围未接入，未展示</td><td><span class="status diff">已知差异</span></td></tr>
+  </table>
+</section>
+
+<!-- 3 -->
+<section id="quick">
+  <div class="screen-tag">Screen 2 · Overlay</div>
+  <h2>快速切换浮层</h2>
+  <p class="lead">数字 1–6 直选；绿点「当前」标出当前所在文件夹；底部键帽常驻。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-quick.png</b></span><span>426 宽</span></div>
+      <div class="frame"><img src="shots/D-quick.png" alt="设计稿：快速切换" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>03-quick-switch.png</b></span><span>PrintWindow · 内容区</span></div>
+      <div class="frame"><img src="shots/03-quick-switch.png" alt="实机：快速切换" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>行首数字 1–6 直跳</td><td>数字徽标 + 数字键/回车直跳</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>绿点「当前」标当前文件夹</td><td>Shell.Application 读取真实资源管理器窗口，按 Z 序判定最上层并提到首行</td><td>无打开窗口时不伪造「当前」</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>3</td><td>副标题与窗口数量</td><td>「已打开的文件夹 / N 个窗口」</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>4</td><td>底部：↑↓ 选择、1–6 直选、↵ 跳转、Esc 取消</td><td>与设计稿一致，含分隔线</td><td>右侧增加灰色「未接入文件对话框」</td><td><span class="status diff">已知差异（如实标注）</span></td></tr>
+    <tr><td>5</td><td>头部图标</td><td>文件夹图标（强调色底）</td><td>设计稿为 scope 图标</td><td><span class="status diff">已知差异</span></td></tr>
+    <tr><td>6</td><td>注入资源管理器打开/保存对话框</td><td>未实现</td><td>只能由主窗按钮唤起</td><td><span class="status na">未接入（界面标注）</span></td></tr>
+  </table>
+</section>
+
+<!-- 4 -->
+<section id="appearance">
+  <div class="screen-tag">Screen 3 · Settings</div>
+  <h2>设置 · 外观与主题</h2>
+  <p class="lead">主题卡是缩微窗口预览；强调色、不透明度、磨砂、结果密度都是真控件，改动即时生效并写回配置。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-settings-appearance.png</b></span><span>840 × 640</span></div>
+      <div class="frame"><img src="shots/D-settings-appearance.png" alt="设计稿：外观与主题" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>04-settings-appearance.png</b></span><span>CopyFromScreen · 200%</span></div>
+      <div class="frame"><img src="shots/04-settings-appearance.png" alt="实机：外观与主题" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>左分类右内容，四页</td><td>外观与主题 / 快捷键 / 搜索范围与索引 / 更新</td><td>设计稿侧栏另有「常规」「关于」，按需求只做四页</td><td><span class="status diff">已知差异</span></td></tr>
+    <tr><td>2</td><td>主题卡缩微窗口预览</td><td>亮/暗两卡，含标题栏、搜索框、结果行缩略与选中描边</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>3</td><td>强调色 / 不透明度 / 磨砂 / 密度真实生效</td><td>5 色即时换肤；60–100% 作用于 Acrylic；材质开关；三段行高</td><td>全部写回 config.json 并刷新主窗</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>4</td><td>标题栏：自定义最小化/关闭</td><td>系统标题栏 + DWM 拖动/贴边/阴影</td><td>系统按钮样式与设计稿不完全一致</td><td><span class="status diff">已知差异</span></td></tr>
+  </table>
+</section>
+
+<!-- 5 -->
+<section id="shortcuts">
+  <div class="screen-tag">Screen 3 · Settings</div>
+  <h2>设置 · 快捷键</h2>
+  <p class="lead">行顺序与说明按设计稿；唤出/隐藏显示真实配置热键。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-settings-shortcuts.png</b></span><span>550 × 640</span></div>
+      <div class="frame"><img src="shots/D-settings-shortcuts.png" alt="设计稿：快捷键" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>05-settings-shortcuts.png</b></span><span>PrintWindow · 内容区</span></div>
+      <div class="frame"><img src="shots/05-settings-shortcuts.png" alt="实机：快捷键" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>四组快捷键与说明</td><td>打开选中结果、在资源管理器中显示、切换搜索范围、隐藏窗口；新增「确认跳转 ↵」</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>唤出/隐藏热键</td><td>按 config.uiHotkey 渲染真实 Ctrl+Alt+Space 键帽</td><td>设计稿占位为「Ctrl Ctrl 连续两次」，改为真实热键更准确</td><td><span class="status ok">已解决（有意修正）</span></td></tr>
+    <tr><td>3</td><td>不可用项不放假控件</td><td>「在资源管理器中显示」「切换搜索范围」等标「未接入」</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+  </table>
+</section>
+
+<!-- 6 -->
+<section id="scope">
+  <div class="screen-tag">Screen 3 · Settings</div>
+  <h2>设置 · 搜索范围与索引</h2>
+  <p class="lead">真实索引状态与条目数；未实现的目录编辑与排除规则明确标注。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-settings-scope.png</b></span><span>840 × 640</span></div>
+      <div class="frame"><img src="shots/D-settings-scope.png" alt="设计稿：搜索范围" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>06-settings-scope.png</b></span><span>CopyFromScreen · 200%</span></div>
+      <div class="frame"><img src="shots/06-settings-scope.png" alt="实机：搜索范围" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>索引状态、条目数、构建时间</td><td>读取服务真实状态并显示</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>目录增删 / 排除规则</td><td>「排除规则」按钮标「未接入」</td><td>目录编辑未实现</td><td><span class="status part">部分</span></td></tr>
+  </table>
+</section>
+
+<!-- 7 -->
+<section id="settings-update">
+  <div class="screen-tag">Screen 3 · Settings</div>
+  <h2>设置 · 更新</h2>
+  <p class="lead">自动检查、频率、最近检查与手动检查均为真实配置；镜像当前只有 GitHub 官方。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-settings-update.png</b></span><span>550 × 640</span></div>
+      <div class="frame"><img src="shots/D-settings-update.png" alt="设计稿：更新设置" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>07-settings-update.png</b></span><span>PrintWindow · 内容区</span></div>
+      <div class="frame"><img src="shots/07-settings-update.png" alt="实机：更新设置" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>自动检查 / 频率 / 最近检查 / 检查按钮</td><td>全部真实读写配置，检查走 GitHub Release API</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>下载镜像：自动（最快）</td><td>下拉只有「GitHub 官方」</td><td>镜像切换未接入</td><td><span class="status part">部分（镜像未接入）</span></td></tr>
+    <tr><td>3</td><td>说明文字不被控件压住</td><td>说明缩短为「当前仅 GitHub 官方源」，与下拉框留出间距</td><td>已修复此前的文字截断</td><td><span class="status ok">已解决</span></td></tr>
+  </table>
+</section>
+
+<!-- 8 -->
+<section id="update-idle">
+  <div class="screen-tag">Screen 4 · State 1</div>
+  <h2>检查更新 · 空闲</h2>
+  <p class="lead">常驻「检查更新」「打开主页」；空闲态「检查更新」是主按钮。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-update-idle.png</b></span><span>440 × 300</span></div>
+      <div class="frame"><img src="shots/D-update-idle.png" alt="设计稿：更新空闲" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>08-update-idle.png</b></span><span>PrintWindow · 内容区</span></div>
+      <div class="frame"><img src="shots/08-update-idle.png" alt="实机：更新空闲" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>「检查更新」主按钮 +「打开主页」次按钮</td><td>检查更新为强调色填充（采样 #3D6EF7），主页为描边按钮</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>品牌标识 / 版本 / 说明排版</td><td>同尺寸标识、版本行、两行说明</td><td>标识仍为字母「P」，图标替换在独立任务中处理</td><td><span class="status part">部分</span></td></tr>
+  </table>
+</section>
+
+<!-- 9 -->
+<section id="update-found">
+  <div class="screen-tag">Screen 4 · State 2</div>
+  <h2>检查更新 · 发现新版本</h2>
+  <p class="lead">增加「更新」「仅下载」，显示版本号、更新说明、镜像下拉；「检查更新」降级为次按钮。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-update-found.png</b></span><span>440 × 300</span></div>
+      <div class="frame"><img src="shots/D-update-found.png" alt="设计稿：发现新版本" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>09-update-found.png</b></span><span>PrintWindow · 测试注入态</span></div>
+      <div class="frame"><img src="shots/09-update-found.png" alt="实机：发现新版本" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>新增「更新」「仅下载」</td><td>更新为主按钮、仅下载为次按钮，均可用</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>版本号、更新说明、镜像下拉</td><td>全部呈现；说明逐条列出</td><td>镜像只有 GitHub 官方；说明用「·」前缀而非独立圆点</td><td><span class="status part">部分</span></td></tr>
+    <tr><td>3</td><td>截图中的测试标识</td><td>右上角「预览 · 测试注入」</td><td>仅测试注入态出现，正常检查不显示</td><td><span class="status diff">测试态标识</span></td></tr>
+  </table>
+</section>
+
+<!-- 10 -->
+<section id="update-downloading">
+  <div class="screen-tag">Screen 4 · State 3</div>
+  <h2>检查更新 · 下载中</h2>
+  <p class="lead">相对上一态只多一条进度：进度条、已下载/总大小、取消。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-update-downloading.png</b></span><span>440 × 300</span></div>
+      <div class="frame"><img src="shots/D-update-downloading.png" alt="设计稿：下载中" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>10-update-downloading.png</b></span><span>PrintWindow · 测试注入态</span></div>
+      <div class="frame"><img src="shots/10-update-downloading.png" alt="实机：下载中" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>只增加进度条与字节数</td><td>进度条 + 已下载/总大小 + 取消；按钮保持</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+  </table>
+</section>
+
+<!-- 11 -->
+<section id="update-downloaded">
+  <div class="screen-tag">Screen 4 · State 4</div>
+  <h2>检查更新 · 仅下载完成</h2>
+  <p class="lead">按钮换成「安装」「打开下载目录」，并显示文件名与大小。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-update-downloaded.png</b></span><span>440 × 300</span></div>
+      <div class="frame"><img src="shots/D-update-downloaded.png" alt="设计稿：仅下载完成" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>11-update-downloaded.png</b></span><span>PrintWindow · 测试注入态</span></div>
+      <div class="frame"><img src="shots/11-update-downloaded.png" alt="实机：仅下载完成" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>「安装」主按钮 +「打开下载目录」</td><td>与设计稿一致；文件行显示路径与大小</td><td>测试注入态点击会明确提示「预览状态不会真的安装」</td><td><span class="status ok">已解决</span></td></tr>
+  </table>
+</section>
+
+<!-- 12 -->
+<section id="tray">
+  <div class="screen-tag">Screen 5 · Tray</div>
+  <h2>托盘菜单</h2>
+  <p class="lead">5 项固定顺序，首项右侧是真实热键提示，退出项红色。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>设计稿 <b>D-tray.png</b></span><span>226 × 174</span></div>
+      <div class="frame"><img src="shots/D-tray.png" alt="设计稿：托盘菜单" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>12-tray-menu.png</b></span><span>PrintWindow · 内容区</span></div>
+      <div class="frame"><img src="shots/12-tray-menu.png" alt="实机：托盘菜单" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>打开搜索框 / 设置 / 检查更新 / 关于 / 退出</td><td>顺序与项名完全一致</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>2</td><td>首项右侧热键提示</td><td>真实 Ctrl+Alt+Space 键帽</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+    <tr><td>3</td><td>分隔线与退出红色</td><td>一致</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
+  </table>
+</section>
+
+<!-- Border -->
+<section id="border">
+  <div class="screen-tag">Milestone · Border</div>
+  <h2>主窗双层边框修复证据</h2>
+  <p class="lead">WinUI 3 在无标题栏时仍保留 1 DIP 非客户区：DWM 画一层、XAML 再画一层，外加系统浅色残留线，共三层叠加。现在去掉非客户区，只留 DWM 一层描边。</p>
+  <div class="border-grid">
+    <div class="zoom">
+      <div class="cap">深色 · 左上角 4× 放大（16-border-dark-zoom.png）</div>
+      <img src="shots/16-border-dark-zoom.png" alt="深色边框放大" />
+    </div>
+    <div class="zoom">
+      <div class="cap">浅色 · 左上角 4× 放大（17-border-light-zoom.png）</div>
+      <img src="shots/17-border-light-zoom.png" alt="浅色边框放大" />
+    </div>
+  </div>
+  <table>
+    <tr><th>采样（1 DIP = 2 物理像素）</th><th>深色 01</th><th>浅色 14</th></tr>
+    <tr><td>左 / 上 / 右 / 下 第 1 像素</td><td><code>#33363C</code></td><td><code>#DDDEE1</code></td></tr>
+    <tr><td>左 / 上 / 右 / 下 第 2 像素</td><td><code>#33363C</code></td><td><code>#DDDEE1</code></td></tr>
+    <tr><td>第 3 像素</td><td>进入内容色</td><td>进入内容色</td></tr>
+    <tr><td>是否出现 #F0F0F0 系统亮线</td><td>否</td><td>否</td></tr>
+    <tr><td>是否出现外圈底色环</td><td>否</td><td>否</td></tr>
+  </table>
+  <div class="callout">
+    <b>结论：</b>四边完全对称，只有一层 DWM 边框。实现位于 <code>Platform/NcFrame.cs</code>（WM_NCCALCSIZE / WM_NCPAINT 归零）与 <code>Platform/WindowChrome.cs</code>（DWMWA_BORDER_COLOR + DWMWCP_ROUND），XAML 自绘描边全部归零。
+  </div>
+  <div class="callout warn">
+    <b>已知差异与未验证项：</b>系统圆角约 8 DIP，设计稿 14 DIP；125% / 150% 缩放未验证（本机固定 200%，改缩放需注销）；最大化/还原不适用（所有窗口固定尺寸且 IsMaximizable=false）。
+  </div>
+</section>
+
+<!-- Status -->
+<section id="status">
+  <div class="screen-tag">Appendix</div>
+  <h2>验证状态</h2>
+  <table>
+    <tr><th>分类</th><th>项目</th></tr>
+    <tr><td><span class="status ok">已实测</span></td><td>五屏结构、深浅主题边框像素扫描、设置五项即时生效、快速切换真实窗口与「当前」标记、更新四态布局与按钮层级、托盘五项与热键、Release 构建、后台回归 12/12</td></tr>
+    <tr><td><span class="status na">未验证</span></td><td>125%/150% 缩放下的边缘与圆角；真实网络下的下载与安装；真实历史记录下的最近访问列表；多用户/多显示器</td></tr>
+    <tr><td><span class="status part">被环境挡住</span></td><td>锁屏状态下的 CopyFromScreen；改系统缩放需注销；本机无 gh 且仓库 API 未授权，无法查询 CI</td></tr>
+  </table>
+  <div class="callout">
+    未接入项（界面已标注，不做假控件）：文件对话框注入、全局 Ctrl+G、在资源管理器中显示、Tab 切换范围、索引目录/排除规则编辑、更新镜像切换、设置侧栏「常规」「关于」。
+  </div>
+</section>
+
+<footer>
+  Pathleap 1.0.1 · 界面对照页 · 设计稿基准 docs/design-reference.html · 截图 docs/shots/ · 详细文字版 docs/界面验收报告.md
+</footer>
+
+</body>
+</html>
