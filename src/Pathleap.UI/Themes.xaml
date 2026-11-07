@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设计令牌：数值逐项取自设计稿（D:\...\temp_20261106_02\index.html 的 :root / html[data-theme]）。
+  只放颜色与描边；强调色、不透明度、磨砂与密度属于运行期可变项，由 ThemeService 负责。
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#171A21" />
+            <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1D2129" />
+            <SolidColorBrush x:Key="Surface2Brush" Color="#1B1F27" />
+            <SolidColorBrush x:Key="Surface3Brush" Color="#232833" />
+            <SolidColorBrush x:Key="Surface4Brush" Color="#2B313D" />
+
+            <SolidColorBrush x:Key="Border1Brush" Color="#13FFFFFF" />
+            <SolidColorBrush x:Key="Border2Brush" Color="#1FFFFFFF" />
+            <SolidColorBrush x:Key="Border3Brush" Color="#30FFFFFF" />
+
+            <SolidColorBrush x:Key="Text1Brush" Color="#EAEDF4" />
+            <SolidColorBrush x:Key="Text2Brush" Color="#A0A8B8" />
+            <SolidColorBrush x:Key="Text3Brush" Color="#737C8D" />
+            <SolidColorBrush x:Key="Text4Brush" Color="#5A6272" />
+
+            <SolidColorBrush x:Key="HlRowBrush" Color="#225382F4" />
+            <SolidColorBrush x:Key="HlRow2Brush" Color="#335382F4" />
+            <SolidColorBrush x:Key="MarkBgBrush" Color="#339090FF" />
+            <SolidColorBrush x:Key="MarkInkBrush" Color="#A9C3FF" />
+
+            <SolidColorBrush x:Key="OkBrush" Color="#2E9E6B" />
+            <SolidColorBrush x:Key="WarnBrush" Color="#C77A18" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#D9503F" />
+
+            <SolidColorBrush x:Key="ScrimBrush" Color="#66000000" />
+            <SolidColorBrush x:Key="RowHoverBrush" Color="#0FFFFFFF" />
+            <LinearGradientBrush x:Key="CaptionBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#1E222A" Offset="0" />
+                <GradientStop Color="#191D24" Offset="1" />
+            </LinearGradientBrush>
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="Surface2Brush" Color="#F7F8FB" />
+            <SolidColorBrush x:Key="Surface3Brush" Color="#EFF2F6" />
+            <SolidColorBrush x:Key="Surface4Brush" Color="#E7EBF1" />
+
+            <SolidColorBrush x:Key="Border1Brush" Color="#17101828" />
+            <SolidColorBrush x:Key="Border2Brush" Color="#24101828" />
+            <SolidColorBrush x:Key="Border3Brush" Color="#38101828" />
+
+            <SolidColorBrush x:Key="Text1Brush" Color="#141821" />
+            <SolidColorBrush x:Key="Text2Brush" Color="#5C6577" />
+            <SolidColorBrush x:Key="Text3Brush" Color="#8A93A5" />
+            <SolidColorBrush x:Key="Text4Brush" Color="#A9B1C0" />
+
+            <SolidColorBrush x:Key="HlRowBrush" Color="#EDF2FF" />
+            <SolidColorBrush x:Key="HlRow2Brush" Color="#E4ECFF" />
+            <SolidColorBrush x:Key="MarkBgBrush" Color="#293D6EF7" />
+            <SolidColorBrush x:Key="MarkInkBrush" Color="#1F4FD8" />
+
+            <SolidColorBrush x:Key="OkBrush" Color="#2E9E6B" />
+            <SolidColorBrush x:Key="WarnBrush" Color="#C77A18" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#D9503F" />
+
+            <SolidColorBrush x:Key="ScrimBrush" Color="#66FFFFFF" />
+            <SolidColorBrush x:Key="RowHoverBrush" Color="#0A101828" />
+            <LinearGradientBrush x:Key="CaptionBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#FBFCFD" Offset="0" />
+                <GradientStop Color="#F2F5F9" Offset="1" />
+            </LinearGradientBrush>
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

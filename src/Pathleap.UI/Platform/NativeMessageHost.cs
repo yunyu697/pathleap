@@ -13,11 +13,6 @@ namespace Pathleap.UI.Platform;
 /// </summary>
 internal sealed class NativeMessageHost : IDisposable
 {
-    private const int MenuShow = 1001;
-    private const int MenuBench = 1002;
-    private const int MenuOpenConfig = 1003;
-    private const int MenuOpenLogs = 1004;
-    private const int MenuExit = 1099;
     private const uint WmQuit = 0x0012;
     private const int TrayIconId = 1;
 
@@ -35,13 +30,8 @@ internal sealed class NativeMessageHost : IDisposable
 
     public event Action? ShowRequested;
 
-    public event Action? BenchRequested;
-
-    public event Action? OpenConfigRequested;
-
-    public event Action? OpenLogRequested;
-
-    public event Action? ExitRequested;
+    /// <summary>托盘右键：把菜单交给 UI 线程绘制（设计稿的 5 项菜单），参数为屏幕坐标。</summary>
+    public event Action<int, int>? TrayMenuRequested;
 
     public HotkeySpec Hotkey { get; private set; } = HotkeySpec.Default;
 
@@ -227,60 +217,13 @@ internal sealed class NativeMessageHost : IDisposable
             return;
         }
 
-        var lpMenu = NativeMethods.CreatePopupMenu();
-        if (lpMenu == IntPtr.Zero)
-        {
-            return;
-        }
-
         try
         {
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfString, new IntPtr(MenuShow), $"显示搜索\t{Hotkey.Display}");
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfString, new IntPtr(MenuBench), "运行唤醒基准测试");
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfSeparator, IntPtr.Zero, null);
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfString, new IntPtr(MenuOpenConfig), "打开配置目录");
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfString, new IntPtr(MenuOpenLogs), "打开日志目录");
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfSeparator, IntPtr.Zero, null);
-            NativeMethods.AppendMenuW(lpMenu, NativeMethods.MfString, new IntPtr(MenuExit), "退出");
-
-            // 托盘菜单需要在菜单前取得前台权限，否则点击菜单外部不会自动消失。
-            NativeMethods.SetForegroundWindow(_lpHwnd);
-            var lpCommand = NativeMethods.TrackPopupMenu(
-                lpMenu,
-                NativeMethods.TpmRightButton | NativeMethods.TpmReturnCommand,
-                lpPoint.X,
-                lpPoint.Y,
-                0,
-                _lpHwnd,
-                IntPtr.Zero);
-            NativeMethods.PostMessageW(_lpHwnd, NativeMethods.WmNull, IntPtr.Zero, IntPtr.Zero);
-
-            switch (lpCommand)
-            {
-                case MenuShow:
-                    ShowRequested?.Invoke();
-                    break;
-                case MenuBench:
-                    BenchRequested?.Invoke();
-                    break;
-                case MenuOpenConfig:
-                    OpenConfigRequested?.Invoke();
-                    break;
-                case MenuOpenLogs:
-                    OpenLogRequested?.Invoke();
-                    break;
-                case MenuExit:
-                    ExitRequested?.Invoke();
-                    break;
-            }
+            TrayMenuRequested?.Invoke(lpPoint.X, lpPoint.Y);
         }
         catch (Exception ex)
         {
-            AppLog.Warn($"托盘菜单异常: {ex.Message}");
-        }
-        finally
-        {
-            NativeMethods.DestroyMenu(lpMenu);
+            AppLog.Warn($"托盘菜单请求异常: {ex.Message}");
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
@@ -10,8 +11,10 @@ using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
+using Pathleap.UI.Data;
 using Pathleap.UI.Perf;
 using Pathleap.UI.Platform;
+using Pathleap.UI.Theme;
 using Windows.Graphics;
 using Windows.System;
 using Windows.UI;
@@ -19,32 +22,24 @@ using Windows.UI;
 namespace Pathleap.UI;
 
 /// <summary>
-/// 搜索窗：无标题栏、置顶、失焦自动隐藏。
-/// 输入经防抖后走命名管道向服务查询，结果列表支持 ↑↓/PgUp/PgDn 选择、↵ 打开、Esc 隐藏。
-/// 预创建且默认不 Activate，保证首帧不在启动阶段渲染；每次唤出时记录 QPC 打点供基准测试使用。
+/// 搜索窗（设计稿屏 1）：空输入展示「最近访问」首页，输入态展示结果行
+/// （图标 → 高亮文件名 → 路径 → 来源标签），选中行有底色与行首 ↵ 键帽，底栏常驻键盘提示。
+/// 无标题栏、默认置顶、失焦自动隐藏；每次唤出记 QPC 打点供基准测试使用。
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    /// <summary>唤出后的失焦宽限期，避免前台锁竞争导致的闪隐。</summary>
     private const double DeactivateGraceMs = 250;
-
-    /// <summary>前台锁重试间隔与次数：Windows 允许前台进程抢焦点，非前台进程会被静默拒绝。</summary>
     private const int ForegroundRetryDelayMs = 120;
     private const int ForegroundRetryAttempts = 2;
-
-    /// <summary>输入防抖：连续敲键时只在停手后发一次查询。</summary>
     private const int SearchDebounceMs = 120;
-
-    /// <summary>结果条数上限（与服务端默认 30 条对齐但略小，一屏内可扫完）。</summary>
     private const int SearchLimit = 24;
-
-    /// <summary>PgUp/PgDn 每次跨过的行数。</summary>
     private const int PageStep = 6;
 
     private readonly AppConfig _lpConfig;
     private readonly IntPtr _lpHwnd;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _lpDispatcher;
-    private readonly ObservableCollection<ResultRow> _lpRows = new();
+    private readonly ObservableCollection<LpResultRow> _lpRows = new();
+    private readonly ThemeService _lpTheme = ThemeService.Instance;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpSearchTimer;
     private int _lpQueryGeneration;
     private bool _lpSuppressAutoSearch;
@@ -55,7 +50,20 @@ public sealed partial class MainWindow : Window
     private bool _lpAllowClose;
     private long _lpShownTick;
     private int _lpVisibleSession;
+    private int _lpSelectedIndex = -1;
+    private bool _lpHomeMode = true;
+    private bool _lpServiceConnected;
+    private string _lpServiceStatus = "正在连接索引服务…";
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpForegroundRetry;
+
+    /// <summary>设置 / 快速切换 / 检查更新 / 关于由 App 接管（避免窗口互相直接引用）。</summary>
+    public event Action? SettingsRequested;
+
+    public event Action? QuickSwitchRequested;
+
+    public event Action? UpdateRequested;
+
+    public event Action? AboutRequested;
 
     public MainWindow(AppConfig config)
     {
@@ -66,11 +74,11 @@ public sealed partial class MainWindow : Window
         _lpDispatcher = DispatcherQueue;
         Title = $"{Branding.DisplayName} · {Branding.ChineseName}";
         BrandMarkText.Text = Branding.Mark;
-        VersionText.Text = Branding.Version;
-        BadgeText.Text = Branding.Version;
-        ResultsList.ItemsSource = _lpRows;
+        ResultsItems.ItemsSource = _lpRows;
 
         ConfigureWindow();
+        ApplyTheme();
+        _lpTheme.Changed += OnThemeChanged;
 
         SearchBox.KeyDown += OnSearchKeyDown;
         SearchBox.GotFocus += OnSearchGotFocus;
@@ -79,15 +87,14 @@ public sealed partial class MainWindow : Window
         Activated += OnActivated;
         AppWindow.Closing += OnAppWindowClosing;
 
+        RecentStore.Updated += OnRecentUpdated;
+        ShowHome();
+
         AppLog.Info($"主窗口已创建（未显示），HWND=0x{_lpHwnd.ToInt64():X}");
     }
 
     public Microsoft.UI.Dispatching.DispatcherQueue UiDispatcher => _lpDispatcher;
 
-    /// <summary>
-    /// 当前是否确实处于前台且可见。基准测试在注入探测键前必须校验这一条，
-    /// 否则探测键会打到用户当前正在使用的窗口上。
-    /// </summary>
     public bool IsForegroundAndVisible()
     {
         return NativeMethods.GetForegroundWindow().Equals(_lpHwnd) && NativeMethods.IsWindowVisible(_lpHwnd);
@@ -97,7 +104,7 @@ public sealed partial class MainWindow : Window
     {
         if (AppWindow.Presenter is OverlappedPresenter lpPresenter)
         {
-            lpPresenter.IsAlwaysOnTop = true;
+            lpPresenter.IsAlwaysOnTop = _lpConfig.PinWindow;
             lpPresenter.IsResizable = false;
             lpPresenter.IsMaximizable = false;
             lpPresenter.IsMinimizable = false;
@@ -113,10 +120,15 @@ public sealed partial class MainWindow : Window
 
         AppWindow.IsShownInSwitchers = false;
         ExtendsContentIntoTitleBar = true;
+        NcFrame.Apply(this);
+        ApplyBackdrop();
+    }
 
+    private void ApplyBackdrop()
+    {
         try
         {
-            SystemBackdrop = new DesktopAcrylicBackdrop();
+            SystemBackdrop = _lpTheme.AcrylicEnabled ? new DesktopAcrylicBackdrop() : null;
         }
         catch (Exception ex)
         {
@@ -124,7 +136,40 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>基准测试预置一次采样；随后注入热键，由 WM_HOTKEY 的 T0 触发显示。</summary>
+    private void ApplyTheme()
+    {
+        RootGrid.RequestedTheme = _lpTheme.ElementTheme;
+        RootGrid.Background = _lpTheme.AcrylicEnabled ? _lpTheme.WindowBackgroundBrush : _lpTheme.SurfaceBrush;
+        WindowChrome.Apply(this, _lpTheme.WindowBorderColor, _lpTheme.IsDark);
+        RootBorder.Background = _lpTheme.AcrylicEnabled
+            ? _lpTheme.WindowBackgroundBrush
+            : new SolidColorBrush(_lpTheme.IsDark ? Color.FromArgb(255, 23, 26, 33) : Microsoft.UI.Colors.White);
+        RootBorder.CornerRadius = new CornerRadius(14);
+
+        var lpGradient = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1)
+        };
+        lpGradient.GradientStops.Add(new GradientStop { Color = _lpTheme.Accent, Offset = 0 });
+        lpGradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 122, 92, 255), Offset = 1 });
+        BrandDot.Background = lpGradient;
+
+        PinButton.Foreground = new SolidColorBrush(_lpTheme.Accent);
+        PinButton.Opacity = _lpConfig.PinWindow ? 1.0 : 0.45;
+
+        ApplyBackdrop();
+        foreach (var lpRow in _lpRows)
+        {
+            lpRow.RefreshVisuals();
+        }
+    }
+
+    private void OnThemeChanged()
+    {
+        ApplyTheme();
+    }
+
     internal WakeSample ArmMeasurement(int index, string probeChar)
     {
         var lpSample = new WakeSample(index, probeChar);
@@ -141,7 +186,6 @@ public sealed partial class MainWindow : Window
         _lpActiveSample = null;
     }
 
-    /// <summary>由热键路径调用：tick 必须是 WM_HOTKEY 处理现场取得的 QPC 时间戳。</summary>
     public void ShowFromHotkey(long tick)
     {
         var lpSample = _lpPendingSample;
@@ -163,7 +207,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>托盘 / 命令行唤出，不做采样。</summary>
     public void ShowFromCommand()
     {
         _lpPendingSample = null;
@@ -184,11 +227,6 @@ public sealed partial class MainWindow : Window
         ScheduleForegroundRetry(_lpVisibleSession, ForegroundRetryAttempts);
     }
 
-    /// <summary>
-    /// 前台锁重试：非前台进程调用 SetForegroundWindow 会被静默拒绝（返回 false 且不报错），
-    /// 表现为窗口已显示但没有焦点。这里在 120ms 后重试，并用 AttachThreadInput 把输入队列
-    /// 挂到当前前台线程上，使抢占前台能够成功。
-    /// </summary>
     private void ScheduleForegroundRetry(int session, int attemptsLeft)
     {
         if (attemptsLeft <= 0 || !_lpVisible || session != _lpVisibleSession)
@@ -286,16 +324,14 @@ public sealed partial class MainWindow : Window
 
     public void SetServiceStatus(string text, bool connected)
     {
+        _lpServiceStatus = text;
+        _lpServiceConnected = connected;
         ServiceStatusText.Text = text;
         StatusDot.Fill = new SolidColorBrush(connected
-            ? Color.FromArgb(255, 71, 191, 122)
+            ? Color.FromArgb(255, 46, 158, 107)
             : Color.FromArgb(255, 199, 122, 24));
     }
 
-    /// <summary>
-    /// 定位到鼠标所在显示器的上部 20% 居中位置。
-    /// 坐标全部来自 Win32（GetMonitorInfoW），避免 WinRT DisplayArea 在部分环境下的调用失败。
-    /// </summary>
     private void PositionWindow()
     {
         try
@@ -402,6 +438,8 @@ public sealed partial class MainWindow : Window
             _lpActiveSample.MarkText(Stopwatch.GetTimestamp());
         }
 
+        PinButton.Visibility = SearchBox.Text.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+        MoreButton.Visibility = SearchBox.Text.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
         ScheduleSearch();
     }
 
@@ -419,8 +457,8 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(SearchBox.Text))
         {
             _lpQueryGeneration++;
-            ApplyResults(null);
-            ShowEmpty("\uE721", "输入关键词开始搜索", "索引由后台服务提供 · ↑↓ 选择 · ↵ 打开 · Esc 隐藏");
+            _lpLastQueryMs = -1;
+            ShowHome();
             return;
         }
 
@@ -440,7 +478,6 @@ public sealed partial class MainWindow : Window
         return lpTimer;
     }
 
-    /// <summary>把查询发到服务管道，并在结果回来时更新列表（过期的响应直接丢弃）。</summary>
     private async Task<IpcReply> RunSearchAsync(string lpQuery)
     {
         var lpGeneration = ++_lpQueryGeneration;
@@ -463,7 +500,7 @@ public sealed partial class MainWindow : Window
             }
 
             _lpLastQueryMs = lpReply.QueryMs;
-            ApplyResults(lpReply.Hits);
+            ApplyResults(lpReply.Hits, lpQuery);
             AppLog.Debug($"结果已应用: q={lpQuery} hits={_lpRows.Count} queryMs={lpReply.QueryMs:0.0}");
             if (_lpRows.Count == 0)
             {
@@ -486,34 +523,90 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ApplyResults(IReadOnlyList<SearchHitDto>? lpPayloadHits)
+    private void ApplyResults(IReadOnlyList<SearchHitDto>? lpPayloadHits, string lpQuery = "")
     {
+        _lpHomeMode = false;
         _lpRows.Clear();
         if (lpPayloadHits is not null)
         {
             foreach (var lpHit in lpPayloadHits)
             {
-                _lpRows.Add(ResultRow.FromDto(lpHit));
+                _lpRows.Add(LpResultRow.FromDto(lpHit, lpQuery));
             }
         }
 
+        GroupLabelText.Text = "搜索结果";
+        GroupIcon.Glyph = "\uE721";
+        ClearHistoryButton.Visibility = Visibility.Collapsed;
+        ResultsCountText.Visibility = Visibility.Visible;
+        ResultsCountText.Text = _lpRows.Count == 0
+            ? string.Empty
+            : (_lpLastQueryMs >= 0 ? $"{_lpRows.Count} 个结果 · {_lpLastQueryMs:0.0} ms" : $"{_lpRows.Count} 个结果");
+
+        _lpSelectedIndex = _lpRows.Count > 0 ? 0 : -1;
+        RefreshSelection();
+        UpdateEmptyState();
+        ServiceStatusText.Text = _lpLastQueryMs >= 0 ? $"{_lpLastQueryMs:0.0} ms" : _lpServiceStatus;
+        StatusDot.Fill = new SolidColorBrush(_lpServiceConnected
+            ? Color.FromArgb(255, 46, 158, 107)
+            : Color.FromArgb(255, 199, 122, 24));
+        if (_lpSelectedIndex >= 0)
+        {
+            ScrollSelectionIntoView();
+        }
+    }
+
+    private void ShowHome()
+    {
+        _lpHomeMode = true;
+        _lpRows.Clear();
+        var lpRecent = RecentStore.Load().Take(6).ToList();
+        foreach (var lpEntry in lpRecent)
+        {
+            _lpRows.Add(LpResultRow.FromRecent(lpEntry));
+        }
+
+        GroupLabelText.Text = "最近访问";
+        GroupIcon.Glyph = "\uE81C";
+        ClearHistoryButton.Visibility = lpRecent.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ResultsCountText.Visibility = Visibility.Collapsed;
+        // 设计稿的空输入首页不预选任何一行；按 ↓ 才出现选中态。
+        _lpSelectedIndex = -1;
+        RefreshSelection();
+        UpdateEmptyState();
+        ServiceStatusText.Text = _lpServiceStatus;
+        StatusDot.Fill = new SolidColorBrush(_lpServiceConnected
+            ? Color.FromArgb(255, 46, 158, 107)
+            : Color.FromArgb(255, 199, 122, 24));
+    }
+
+    private void OnRecentUpdated()
+    {
+        if (_lpHomeMode)
+        {
+            ShowHome();
+        }
+    }
+
+    private void UpdateEmptyState()
+    {
         if (_lpRows.Count > 0)
         {
-            ResultsList.SelectedIndex = 0;
             EmptyPanel.Visibility = Visibility.Collapsed;
-            ResultsList.Visibility = Visibility.Visible;
+            ResultsScroller.Visibility = Visibility.Visible;
+            return;
+        }
+
+        ResultsScroller.Visibility = Visibility.Collapsed;
+        EmptyPanel.Visibility = Visibility.Visible;
+        if (_lpHomeMode)
+        {
+            ShowEmpty("\uE81C", "还没有最近访问", "打开任意搜索结果后，会出现在这里");
         }
         else
         {
-            EmptyPanel.Visibility = Visibility.Visible;
-            ResultsList.Visibility = Visibility.Collapsed;
+            ShowEmpty("\uE721", "没有匹配的结果", "试试更短的关键词，或文件名中的一段");
         }
-
-        ResultsCountText.Text = _lpRows.Count == 0
-            ? string.Empty
-            : (_lpLastQueryMs >= 0
-                ? $"{_lpRows.Count} 条 · {_lpLastQueryMs:0.0} ms"
-                : $"{_lpRows.Count} 条");
     }
 
     private void ShowEmpty(string lpGlyph, string lpTitle, string lpHint)
@@ -522,7 +615,7 @@ public sealed partial class MainWindow : Window
         EmptyTitleText.Text = lpTitle;
         EmptyHintText.Text = lpHint;
         EmptyPanel.Visibility = Visibility.Visible;
-        ResultsList.Visibility = Visibility.Collapsed;
+        ResultsScroller.Visibility = Visibility.Collapsed;
     }
 
     private void MoveSelection(int lpDelta)
@@ -532,16 +625,66 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var lpNext = ResultsList.SelectedIndex + lpDelta;
-        lpNext = Math.Clamp(lpNext, 0, _lpRows.Count - 1);
-        ResultsList.SelectedIndex = lpNext;
-        ResultsList.ScrollIntoView(_lpRows[lpNext]);
+        _lpSelectedIndex = Math.Clamp(_lpSelectedIndex + lpDelta, 0, _lpRows.Count - 1);
+        RefreshSelection();
+        ScrollSelectionIntoView();
     }
 
-    /// <summary>↵：目录用资源管理器打开，文件交给系统默认程序；打开后立即隐藏窗口。</summary>
+    private void RefreshSelection()
+    {
+        for (var lpIndex = 0; lpIndex < _lpRows.Count; lpIndex++)
+        {
+            _lpRows[lpIndex].IsSelected = lpIndex == _lpSelectedIndex;
+        }
+    }
+
+    private void ScrollSelectionIntoView()
+    {
+        if (_lpSelectedIndex < 0)
+        {
+            return;
+        }
+
+        var lpRowHeight = _lpTheme.RowHeight + 1;
+        var lpOffset = Math.Max(0, _lpSelectedIndex * lpRowHeight - 24);
+        ResultsScroller.ChangeView(null, lpOffset, null, disableAnimation: true);
+    }
+
+    private void OnRowPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement lpElement && lpElement.DataContext is LpResultRow lpRow)
+        {
+            lpRow.IsHovered = true;
+        }
+    }
+
+    private void OnRowPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement lpElement && lpElement.DataContext is LpResultRow lpRow)
+        {
+            lpRow.IsHovered = false;
+        }
+    }
+
+    private void OnRowTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement lpElement && lpElement.DataContext is LpResultRow lpRow)
+        {
+            var lpIndex = _lpRows.IndexOf(lpRow);
+            if (lpIndex >= 0)
+            {
+                _lpSelectedIndex = lpIndex;
+                RefreshSelection();
+            }
+
+            OpenSelected();
+        }
+    }
+
+    /// <summary>↵/单击：目录用资源管理器打开，文件交给系统默认程序；记录最近访问后隐藏窗口。</summary>
     private void OpenSelected()
     {
-        var lpIndex = ResultsList.SelectedIndex;
+        var lpIndex = _lpSelectedIndex;
         if (lpIndex < 0 || lpIndex >= _lpRows.Count)
         {
             AppLog.Info("没有可打开的搜索结果。");
@@ -555,6 +698,7 @@ public sealed partial class MainWindow : Window
                 ? new ProcessStartInfo("explorer.exe", $"\"{lpRow.FullPath}\"") { UseShellExecute = true }
                 : new ProcessStartInfo(lpRow.FullPath) { UseShellExecute = true };
             Process.Start(lpStartInfo);
+            RecentStore.Record(lpRow.FullPath, lpRow.Name, lpRow.IsDirectory);
             AppLog.Info($"已打开 {(lpRow.IsDirectory ? "目录" : "文件")}: {lpRow.FullPath}");
             HideCore();
         }
@@ -565,13 +709,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// 自动化/后台验证入口：等价于用户输入这段文本并等结果返回（不注入真实键鼠、不抢前台）。
-    /// </summary>
     internal async Task<IpcReply> QueryForTestAsync(string lpQuery)
     {
-        // TextBox.TextChanged 是异步派发的：置文本后它可能在 await 期间才触发并启动防抖定时器，
-        // 导致同一查询被跑两次、先到的响应被当成过期结果丢弃。自动化路径全程抑制防抖。
         _lpSuppressAutoSearch = true;
         try
         {
@@ -587,7 +726,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>自动化/后台验证入口：等价于按 ↑/↓ 移动选择。</summary>
     internal IpcReply SelectForTest(int lpDelta)
     {
         MoveSelection(lpDelta);
@@ -596,11 +734,10 @@ public sealed partial class MainWindow : Window
 
     private IpcReply BuildSelectionReply(string lpMessage)
     {
-        var lpIndex = ResultsList.SelectedIndex;
         return new IpcReply
         {
             Ok = true,
-            Message = $"{lpMessage} results={_lpRows.Count} selected={lpIndex}",
+            Message = $"{lpMessage} results={_lpRows.Count} selected={_lpSelectedIndex}",
             QueryMs = _lpLastQueryMs,
             CandidateCount = _lpRows.Count,
             Hits = _lpRows.Select(static lpRow => lpRow.ToDto()).ToList()
@@ -621,7 +758,6 @@ public sealed partial class MainWindow : Window
             && _lpConfig.HideOnDeactivate
             && _lpVisible)
         {
-            // 刚唤出时 Windows 前台锁可能造成一次短暂失焦，不应让窗口闪一下就消失。
             var lpElapsedMs = (Stopwatch.GetTimestamp() - _lpShownTick) * 1000.0 / Stopwatch.Frequency;
             if (lpElapsedMs < DeactivateGraceMs)
             {
@@ -647,14 +783,55 @@ public sealed partial class MainWindow : Window
     public void PrepareShutdown()
     {
         _lpAllowClose = true;
+        _lpTheme.Changed -= OnThemeChanged;
+        RecentStore.Updated -= OnRecentUpdated;
     }
+
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        _lpConfig.PinWindow = !_lpConfig.PinWindow;
+        _lpTheme.SaveConfig();
+        if (AppWindow.Presenter is OverlappedPresenter lpPresenter)
+        {
+            lpPresenter.IsAlwaysOnTop = _lpConfig.PinWindow;
+        }
+
+        PinButton.Opacity = _lpConfig.PinWindow ? 1.0 : 0.45;
+        AppLog.Info($"窗口置顶: {_lpConfig.PinWindow}");
+    }
+
+    private void OnClearClick(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = string.Empty;
+        SearchBox.Focus(FocusState.Programmatic);
+    }
+
+    private void OnClearHistoryClick(object sender, RoutedEventArgs e)
+    {
+        RecentStore.Clear();
+        ShowHome();
+    }
+
+    private void OnOpenSettingsClick(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke();
+
+    private void OnOpenQuickSwitchClick(object sender, RoutedEventArgs e) => QuickSwitchRequested?.Invoke();
+
+    private void OnCheckUpdateClick(object sender, RoutedEventArgs e) => UpdateRequested?.Invoke();
+
+    private void OnAboutClick(object sender, RoutedEventArgs e) => AboutRequested?.Invoke();
 }
 
-/// <summary>结果列表一行的展示模型（名字、所在目录、大小文本、图标字形）。</summary>
-public sealed class ResultRow
+/// <summary>结果 / 最近访问一行的展示模型，选中态与主题/密度变化时刷新自身画刷。</summary>
+public sealed class LpResultRow : INotifyPropertyChanged
 {
-    private const string FolderGlyph = "\uE8B7";
-    private const string FileGlyph = "\uE7C3";
+    private static readonly Color FileColor = Color.FromArgb(255, 76, 134, 240);
+    private static readonly Color FolderColor = Color.FromArgb(255, 215, 160, 58);
+    private static readonly Color AppColor = Color.FromArgb(255, 151, 121, 242);
+
+    private bool _lpIsSelected;
+    private bool _lpIsHovered;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     public string Name { get; init; } = string.Empty;
 
@@ -662,9 +839,13 @@ public sealed class ResultRow
 
     public string FolderPath { get; init; } = string.Empty;
 
-    public string SizeText { get; init; } = string.Empty;
+    public string Query { get; init; } = string.Empty;
 
-    public string Glyph { get; init; } = FileGlyph;
+    public string Glyph { get; init; } = "\uE7C3";
+
+    public string Tag { get; init; } = "文件";
+
+    public string TimeText { get; init; } = string.Empty;
 
     public bool IsDirectory { get; init; }
 
@@ -676,21 +857,108 @@ public sealed class ResultRow
 
     public double Score { get; init; }
 
-    public static ResultRow FromDto(SearchHitDto lpDto)
+    public bool IsSelected
+    {
+        get => _lpIsSelected;
+        set
+        {
+            if (_lpIsSelected == value)
+            {
+                return;
+            }
+
+            _lpIsSelected = value;
+            RefreshVisuals();
+        }
+    }
+
+    public bool IsHovered
+    {
+        get => _lpIsHovered;
+        set
+        {
+            if (_lpIsHovered == value)
+            {
+                return;
+            }
+
+            _lpIsHovered = value;
+            Raise(nameof(RowBackground));
+        }
+    }
+
+    public double RowHeight => ThemeService.Instance.RowHeight;
+
+    public double NameFontSize => ThemeService.Instance.RowNameFontSize;
+
+    public Windows.UI.Text.FontWeight NameWeight => IsSelected ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+    public Visibility PathVisibility => ThemeService.Instance.ShowRowPath ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility EnterVisibility => IsSelected ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility TagVisibility => string.IsNullOrEmpty(TimeText) ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility TimeVisibility => string.IsNullOrEmpty(TimeText) ? Visibility.Collapsed : Visibility.Visible;
+
+    public Brush RowBackground =>
+        IsSelected ? ThemeService.Instance.SelectionBrush :
+        IsHovered ? ThemeService.Instance.RowHoverBrush :
+        ThemeService.Instance.TransparentBrush;
+
+    public Brush RowBorderBrush =>
+        IsSelected ? ThemeService.Instance.SelectionBorderBrush : ThemeService.Instance.TransparentBrush;
+
+    public Brush EnterBackground => ThemeService.Instance.AccentBrush;
+
+    public Brush IconBackground { get; init; } = ThemeService.Instance.TransparentBrush;
+
+    public Brush IconBorderBrush { get; init; } = ThemeService.Instance.TransparentBrush;
+
+    public Brush IconForeground { get; init; } = ThemeService.Instance.TransparentBrush;
+
+    public static LpResultRow FromDto(SearchHitDto lpDto, string lpQuery)
     {
         var lpFolder = System.IO.Path.GetDirectoryName(lpDto.Path) ?? string.Empty;
-        return new ResultRow
+        var lpIsApp = !lpDto.IsDirectory && IsProgram(lpDto.Name);
+        var lpColor = lpDto.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
+        return new LpResultRow
         {
             Name = lpDto.Name,
             FullPath = lpDto.Path,
             FolderPath = lpFolder,
-            SizeText = lpDto.IsDirectory ? string.Empty : FormatSize(lpDto.Size),
-            Glyph = lpDto.IsDirectory ? FolderGlyph : FileGlyph,
+            Query = lpQuery,
+            Glyph = lpDto.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
+            Tag = lpDto.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
             IsDirectory = lpDto.IsDirectory,
             Size = lpDto.Size,
             ModifiedAt = lpDto.ModifiedAt,
             Tier = lpDto.Tier,
-            Score = lpDto.Score
+            Score = lpDto.Score,
+            IconForeground = new SolidColorBrush(lpColor),
+            IconBackground = new SolidColorBrush(Color.FromArgb(26, lpColor.R, lpColor.G, lpColor.B)),
+            IconBorderBrush = new SolidColorBrush(Color.FromArgb(48, lpColor.R, lpColor.G, lpColor.B))
+        };
+    }
+
+    public static LpResultRow FromRecent(RecentEntry lpEntry)
+    {
+        var lpIsApp = !lpEntry.IsDirectory && IsProgram(lpEntry.Name);
+        var lpColor = lpEntry.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
+        return new LpResultRow
+        {
+            Name = lpEntry.Name,
+            FullPath = lpEntry.Path,
+            FolderPath = lpEntry.IsDirectory
+                ? System.IO.Path.GetDirectoryName(lpEntry.Path) ?? lpEntry.Path
+                : System.IO.Path.GetDirectoryName(lpEntry.Path) ?? string.Empty,
+            Glyph = lpEntry.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
+            Tag = lpEntry.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
+            IsDirectory = lpEntry.IsDirectory,
+            TimeText = RelativeTime(lpEntry.AccessedAt),
+            IconForeground = new SolidColorBrush(lpColor),
+            IconBackground = new SolidColorBrush(Color.FromArgb(26, lpColor.R, lpColor.G, lpColor.B)),
+            IconBorderBrush = new SolidColorBrush(Color.FromArgb(48, lpColor.R, lpColor.G, lpColor.B))
         };
     }
 
@@ -705,20 +973,54 @@ public sealed class ResultRow
         Score = Score
     };
 
-    private static string FormatSize(long lpBytes)
+    public void RefreshVisuals()
     {
-        if (lpBytes < 1024)
+        Raise(nameof(RowBackground));
+        Raise(nameof(RowBorderBrush));
+        Raise(nameof(RowHeight));
+        Raise(nameof(NameFontSize));
+        Raise(nameof(NameWeight));
+        Raise(nameof(PathVisibility));
+        Raise(nameof(EnterVisibility));
+        Raise(nameof(EnterBackground));
+        Raise(nameof(TagVisibility));
+        Raise(nameof(TimeVisibility));
+    }
+
+    private void Raise(string lpName)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(lpName));
+    }
+
+    private static bool IsProgram(string lpName)
+    {
+        var lpExtension = System.IO.Path.GetExtension(lpName);
+        return lpExtension is ".exe" or ".lnk" or ".bat" or ".cmd" or ".msi" or ".com" or ".ps1";
+    }
+
+    private static string RelativeTime(DateTimeOffset lpTime)
+    {
+        var lpDelta = DateTimeOffset.Now - lpTime;
+        if (lpDelta < TimeSpan.FromMinutes(1))
         {
-            return $"{lpBytes} B";
+            return "刚刚";
         }
 
-        var lpKb = lpBytes / 1024.0;
-        if (lpKb < 1024)
+        if (lpDelta < TimeSpan.FromHours(1))
         {
-            return $"{lpKb:0.#} KB";
+            return $"{lpDelta.Minutes} 分钟前";
         }
 
-        var lpMb = lpKb / 1024.0;
-        return lpMb < 1024 ? $"{lpMb:0.#} MB" : $"{lpMb / 1024.0:0.#} GB";
+        if (lpDelta < TimeSpan.FromDays(1))
+        {
+            return $"{lpDelta.Hours} 小时前";
+        }
+
+        if (lpDelta < TimeSpan.FromDays(30))
+        {
+            return $"{lpDelta.Days} 天前";
+        }
+
+        return lpTime.ToString("yyyy-MM-dd");
     }
 }

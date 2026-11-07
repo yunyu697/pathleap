@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Pathleap.UI.TrayMenuWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid x:Name="RootGrid" Background="Transparent">
+        <Border x:Name="RootBorder"
+                Background="{ThemeResource SurfaceBrush}"
+                BorderBrush="{ThemeResource Border2Brush}"
+                BorderThickness="0"
+                CornerRadius="9">
+            <StackPanel x:Name="ItemsPanel" Padding="5,5,5,5" Spacing="1" />
+        </Border>
+        <Button x:Name="KeySink"
+                Width="1" Height="1"
+                Opacity="0"
+                IsTabStop="True"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top" />
+    </Grid>
+</Window>

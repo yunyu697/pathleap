@@ -6,6 +6,8 @@ using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
 using Pathleap.UI.Perf;
 using Pathleap.UI.Platform;
+using Pathleap.UI.Theme;
+using Pathleap.UI.Update;
 
 namespace Pathleap.UI;
 
@@ -15,6 +17,11 @@ public partial class App : Application
     private MainWindow? _lpWindow;
     private NativeMessageHost? _lpNativeHost;
     private ServiceLauncher? _lpService;
+    private SettingsWindow? _lpSettingsWindow;
+    private UpdateWindow? _lpUpdateWindow;
+    private QuickSwitchWindow? _lpQuickWindow;
+    private TrayMenuWindow? _lpTrayMenu;
+    private AboutWindow? _lpAboutWindow;
     private HotkeySpec _lpHotkey = HotkeySpec.Default;
     private readonly CancellationTokenSource _lpCts = new();
     private readonly DateTimeOffset _lpStartedAt = DateTimeOffset.Now;
@@ -63,7 +70,13 @@ public partial class App : Application
             AppLog.Info($"配置加载完成: hotkey={_lpConfig.UiHotkey}, startService={_lpConfig.StartServiceWithUi}, " +
                         $"hideOnDeactivate={_lpConfig.HideOnDeactivate}, benchSamples={_lpConfig.BenchSamples}");
 
+            ThemeService.Instance.Load(_lpConfig, AppPaths.ConfigFile);
+
             _lpWindow = new MainWindow(_lpConfig);
+            _lpWindow.SettingsRequested += OpenSettings;
+            _lpWindow.QuickSwitchRequested += OpenQuickSwitch;
+            _lpWindow.UpdateRequested += OpenUpdate;
+            _lpWindow.AboutRequested += OpenAbout;
 
             _lpNativeHost = new NativeMessageHost();
             WireNativeEvents();
@@ -87,20 +100,27 @@ public partial class App : Application
             StartIpc();
             _ = EnsureServiceAsync();
 
+            var lpScreenMode = !string.IsNullOrEmpty(Program.Startup.Screen);
             if (!_lpNativeHost.HotkeyRegistered)
             {
                 var lpMessage = $"热键 {_lpHotkey.Display} 注册失败（Win32={_lpNativeHost.HotkeyErrorCode}）。" +
                                 "请从托盘菜单打开搜索，或修改配置中的 uiHotkey。";
                 AppLog.Warn(lpMessage);
                 _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 热键不可用", lpMessage);
-                if (!Program.Startup.AutoBench)
+                if (!Program.Startup.AutoBench && !lpScreenMode)
                 {
                     _lpWindow.ShowFromCommand();
                 }
             }
-            else if (Program.Startup.ShowOnStart)
+            else if (Program.Startup.ShowOnStart && !lpScreenMode)
             {
                 _lpWindow.ShowFromCommand();
+            }
+
+            if (lpScreenMode)
+            {
+                await ShowScreenAsync(Program.Startup.Screen);
+                return;
             }
 
             if (Program.Startup.AutoBench)
@@ -121,6 +141,8 @@ public partial class App : Application
                 var lpReply = await RunBenchmarkAsync(lpSamples);
                 Shutdown(lpReply.Ok ? 0 : 5);
             }
+
+            _ = RunAutoUpdateCheckAsync();
         }
         catch (Exception ex)
         {
@@ -141,16 +163,7 @@ public partial class App : Application
 
         _lpNativeHost.ShowRequested += () => Dispatch(() => _lpWindow?.ShowFromCommand());
 
-        _lpNativeHost.BenchRequested += () => Dispatch(() =>
-        {
-            _ = RunBenchmarkAndNotifyAsync();
-        });
-
-        _lpNativeHost.OpenConfigRequested += () => OpenFolder(AppPaths.UserRoot);
-
-        _lpNativeHost.OpenLogRequested += () => OpenFolder(AppPaths.LogsRoot);
-
-        _lpNativeHost.ExitRequested += () => Dispatch(() => Shutdown(0));
+        _lpNativeHost.TrayMenuRequested += (x, y) => Dispatch(() => OpenTrayMenu(x, y));
     }
 
     private async Task RunBenchmarkAndNotifyAsync()
@@ -360,6 +373,251 @@ public partial class App : Application
         });
     }
 
+    private void OpenSettings() => OpenSettings("appearance");
+
+    private void OpenSettings(string page)
+    {
+        if (_lpSettingsWindow is not null)
+        {
+            _lpSettingsWindow.ShowPageForTest(page);
+            _lpSettingsWindow.Activate();
+            return;
+        }
+
+        var lpWindow = new SettingsWindow(_lpConfig);
+        lpWindow.UpdateRequested += OpenUpdate;
+        lpWindow.Closed += (_, _) =>
+        {
+            lpWindow.PrepareShutdown();
+            _lpSettingsWindow = null;
+        };
+
+        _lpSettingsWindow = lpWindow;
+        lpWindow.ShowPageForTest(page);
+        lpWindow.Activate();
+        AppLog.Info($"设置窗已打开: page={page}");
+    }
+
+    private void OpenUpdate() => OpenUpdate(string.Empty);
+
+    private void OpenUpdate(string previewState)
+    {
+        if (_lpUpdateWindow is not null)
+        {
+            _lpUpdateWindow.Activate();
+            if (!string.IsNullOrEmpty(previewState))
+            {
+                _lpUpdateWindow.ShowPreview(previewState);
+            }
+
+            return;
+        }
+
+        var lpWindow = new UpdateWindow(_lpConfig);
+        lpWindow.Closed += (_, _) =>
+        {
+            lpWindow.PrepareShutdown();
+            _lpUpdateWindow = null;
+        };
+
+        _lpUpdateWindow = lpWindow;
+        if (!string.IsNullOrEmpty(previewState))
+        {
+            lpWindow.ShowPreview(previewState);
+        }
+
+        lpWindow.Activate();
+        AppLog.Info($"更新窗已打开: state={(string.IsNullOrEmpty(previewState) ? "idle" : previewState)}");
+    }
+
+    private void OpenQuickSwitch()
+    {
+        if (_lpQuickWindow is null)
+        {
+            var lpWindow = new QuickSwitchWindow(_lpConfig);
+            lpWindow.Closed += (_, _) =>
+            {
+                lpWindow.PrepareShutdown();
+                _lpQuickWindow = null;
+            };
+            _lpQuickWindow = lpWindow;
+        }
+
+        _lpQuickWindow.ShowAtCursor();
+        AppLog.Info("快速切换浮层已打开");
+    }
+
+    private void OpenAbout()
+    {
+        if (_lpAboutWindow is not null)
+        {
+            _lpAboutWindow.Activate();
+            return;
+        }
+
+        var lpWindow = new AboutWindow();
+        lpWindow.Closed += (_, _) => _lpAboutWindow = null;
+        _lpAboutWindow = lpWindow;
+        lpWindow.Activate();
+        AppLog.Info("关于窗已打开");
+    }
+
+    private void OpenTrayMenu(int screenX, int screenY)
+    {
+        if (_lpTrayMenu is null)
+        {
+            var lpMenu = new TrayMenuWindow(_lpHotkey.Display);
+            lpMenu.ShowSearchRequested += () => _lpWindow?.UiDispatcher.TryEnqueue(() => _lpWindow.ShowFromCommand());
+            lpMenu.SettingsRequested += () => Dispatch(OpenSettings);
+            lpMenu.UpdateRequested += () => Dispatch(OpenUpdate);
+            lpMenu.AboutRequested += () => Dispatch(OpenAbout);
+            lpMenu.ExitRequested += () => Dispatch(() => Shutdown(0));
+            lpMenu.Closed += (_, _) =>
+            {
+                lpMenu.PrepareShutdown();
+                _lpTrayMenu = null;
+            };
+            _lpTrayMenu = lpMenu;
+        }
+
+        _lpTrayMenu.ShowAt(screenX, screenY);
+    }
+
+    private async Task RunAutoUpdateCheckAsync()
+    {
+        try
+        {
+            if (!_lpConfig.AutoCheckUpdates || _lpConfig.UpdateCheckHours <= 0)
+            {
+                AppLog.Info("自动检查更新已关闭（autoCheckUpdates=false 或仅手动）。");
+                return;
+            }
+
+            var lpLast = DateTimeOffset.MinValue;
+            if (!string.IsNullOrWhiteSpace(_lpConfig.LastUpdateCheck))
+            {
+                try
+                {
+                    lpLast = DateTimeOffset.Parse(_lpConfig.LastUpdateCheck);
+                }
+                catch
+                {
+                    lpLast = DateTimeOffset.MinValue;
+                }
+            }
+
+            if (lpLast != DateTimeOffset.MinValue
+                && (DateTimeOffset.Now - lpLast).TotalHours < _lpConfig.UpdateCheckHours)
+            {
+                AppLog.Info($"距上次检查更新未满 {_lpConfig.UpdateCheckHours} 小时，跳过。");
+                return;
+            }
+
+            // 让托盘与服务先稳定，不必和启动流程抢时间。
+            await Task.Delay(TimeSpan.FromSeconds(6), _lpCts.Token);
+            var lpResult = await UpdateService.CheckAsync(_lpCts.Token);
+            _lpConfig.LastUpdateCheck = DateTimeOffset.Now.ToString("O");
+            ThemeService.Instance.SaveConfig();
+
+            if (!lpResult.Ok || !lpResult.HasUpdate)
+            {
+                AppLog.Info($"自动检查更新: {lpResult.Message}");
+                return;
+            }
+
+            AppLog.Info($"自动检查更新发现新版本 {lpResult.RemoteVersion}");
+            _lpNativeHost?.ShowTrayInfo(
+                $"{Branding.DisplayName} {lpResult.RemoteVersion} 可用",
+                "右键托盘图标，选择「检查更新」查看版本说明与下载。");
+        }
+        catch (OperationCanceledException)
+        {
+            // 退出时取消，无需记录。
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"自动检查更新失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 截图模式：按 --screen 打开对应界面并保持，供外部抓图。绝不改动真实数据。
+    /// </summary>
+    private async Task ShowScreenAsync(string screen)
+    {
+        AppLog.Info($"截图模式: {screen}, query={Program.Startup.Query}");
+        switch (screen.ToLowerInvariant())
+        {
+            case "recent":
+                _lpWindow?.ShowFromCommand();
+                break;
+
+            case "results":
+                _lpWindow?.ShowFromCommand();
+                if (_lpWindow is not null)
+                {
+                    var lpQuery = string.IsNullOrWhiteSpace(Program.Startup.Query)
+                        ? "pathleap"
+                        : Program.Startup.Query;
+                    await _lpWindow.QueryForTestAsync(lpQuery);
+                }
+
+                break;
+
+            case "quick":
+                OpenQuickSwitch();
+                break;
+
+            case "settings":
+            case "settings-appearance":
+                OpenSettings("appearance");
+                break;
+
+            case "settings-shortcuts":
+                OpenSettings("shortcuts");
+                break;
+
+            case "settings-scope":
+                OpenSettings("scope");
+                break;
+
+            case "settings-update":
+                OpenSettings("update");
+                break;
+
+            case "update":
+                OpenUpdate(string.Empty);
+                break;
+
+            case "update-found":
+                OpenUpdate("found");
+                break;
+
+            case "update-downloading":
+                OpenUpdate("downloading");
+                break;
+
+            case "update-downloaded":
+                OpenUpdate("downloaded");
+                break;
+
+            case "about":
+                OpenAbout();
+                break;
+
+            case "tray":
+            {
+                var lpWork = Microsoft.UI.Windowing.DisplayArea.Primary.WorkArea;
+                OpenTrayMenu(lpWork.X + lpWork.Width - 24, lpWork.Y + lpWork.Height - 24);
+                break;
+            }
+
+            default:
+                AppLog.Warn($"未知截图界面: {screen}");
+                break;
+        }
+    }
+
     private void OpenFolder(string path)
     {
         try
@@ -412,6 +670,23 @@ public partial class App : Application
         catch (Exception ex)
         {
             AppLog.Warn($"停止服务失败: {ex.Message}");
+        }
+
+        try
+        {
+            _lpQuickWindow?.PrepareShutdown();
+            _lpQuickWindow?.Close();
+            _lpTrayMenu?.PrepareShutdown();
+            _lpTrayMenu?.Close();
+            _lpSettingsWindow?.PrepareShutdown();
+            _lpSettingsWindow?.Close();
+            _lpUpdateWindow?.PrepareShutdown();
+            _lpUpdateWindow?.Close();
+            _lpAboutWindow?.Close();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"关闭辅助窗口失败: {ex.Message}");
         }
 
         try

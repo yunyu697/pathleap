@@ -21,12 +21,32 @@ internal sealed class StartupOptions
 
     public bool ShowOnStart { get; set; } = true;
 
+    /// <summary>截图模式：--screen=recent|results|quick|settings-*|update*|tray|about。留空为正常启动。</summary>
+    public string Screen { get; set; } = string.Empty;
+
+    /// <summary>截图/调试用：--query=文本，配合 --screen=results 直接填入搜索框。</summary>
+    public string Query { get; set; } = string.Empty;
+
     public static StartupOptions Parse(string[] args)
     {
         var lpOptions = new StartupOptions();
         for (var lpIndex = 0; lpIndex < args.Length; lpIndex++)
         {
-            switch (args[lpIndex].ToLowerInvariant())
+            var lpArg = args[lpIndex];
+            if (lpArg.StartsWith("--screen=", StringComparison.OrdinalIgnoreCase))
+            {
+                lpOptions.Screen = lpArg["--screen=".Length..].Trim();
+                lpOptions.ShowOnStart = false;
+                continue;
+            }
+
+            if (lpArg.StartsWith("--query=", StringComparison.OrdinalIgnoreCase))
+            {
+                lpOptions.Query = lpArg["--query=".Length..];
+                continue;
+            }
+
+            switch (lpArg.ToLowerInvariant())
             {
                 case "--bench":
                     lpOptions.AutoBench = true;

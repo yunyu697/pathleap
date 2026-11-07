@@ -19,6 +19,12 @@ public static class AppPaths
     /// <summary>性能实测数据目录（CSV + JSON）。</summary>
     public static string PerfRoot { get; } = Path.Combine(UserRoot, "perf");
 
+    /// <summary>最近访问记录（用户实际打开过的条目，按时间倒序，最多 24 条）。</summary>
+    public static string RecentFile { get; } = Path.Combine(UserRoot, "recent.json");
+
+    /// <summary>更新包下载目录（只由用户显式点击「更新 / 仅下载」时写入）。</summary>
+    public static string UpdatesRoot { get; } = Path.Combine(UserRoot, "updates");
+
     /// <summary>服务数据根。控制台模式使用当前用户目录；M2 的 SCM 模式改用 ProgramData。</summary>
     public static string ServiceRoot { get; } =
         Environment.GetEnvironmentVariable("PATHLEAP_DATA_ROOT")

@@ -24,6 +24,39 @@ public sealed class AppConfig
 
     public int WindowHeight { get; set; } = 436;
 
+    /// <summary>主题：System / Light / Dark。</summary>
+    public string ThemeMode { get; set; } = "Dark";
+
+    /// <summary>强调色（#RRGGBB），同步到选中态与高亮片段。</summary>
+    public string AccentColor { get; set; } = "#3D6EF7";
+
+    /// <summary>窗口不透明度（0.6–1.0）；与磨砂背景搭配使用。</summary>
+    public double WindowOpacity { get; set; } = 0.92;
+
+    /// <summary>是否启用磨砂（DesktopAcrylicBackdrop）。</summary>
+    public bool AcrylicEnabled { get; set; } = true;
+
+    /// <summary>结果列表密度：Compact / Standard / Comfortable。</summary>
+    public string ResultDensity { get; set; } = "Standard";
+
+    /// <summary>搜索窗是否固定置顶（对应主窗口工具条上的图钉）。</summary>
+    public bool PinWindow { get; set; } = true;
+
+    /// <summary>启动时自动检查更新（只做一次 HTTP 查询，不下载）。</summary>
+    public bool AutoCheckUpdates { get; set; } = true;
+
+    /// <summary>更新通道：stable / preview（preview 未接入，界面会标注）。</summary>
+    public string UpdateChannel { get; set; } = "stable";
+
+    /// <summary>下载镜像：github（当前唯一可用）。</summary>
+    public string DownloadMirror { get; set; } = "github";
+
+    /// <summary>上次检查更新的时间（ISO 8601），供界面展示。</summary>
+    public string LastUpdateCheck { get; set; } = string.Empty;
+
+    /// <summary>自动检查的间隔小时数：24=每天，168=每周，0=仅手动。</summary>
+    public int UpdateCheckHours { get; set; } = 24;
+
     /// <summary>Debug / Info / Warn / Error。</summary>
     public string LogLevel { get; set; } = "Info";
 
@@ -44,6 +77,35 @@ public sealed class AppConfig
         WindowHeight = Math.Clamp(WindowHeight, 320, 700);
         BenchSamples = Math.Clamp(BenchSamples, 20, 2000);
 
+        if (ThemeMode is not ("System" or "Light" or "Dark"))
+        {
+            ThemeMode = "Dark";
+        }
+
+        if (!IsHexColor(AccentColor))
+        {
+            AccentColor = "#3D6EF7";
+        }
+
+        WindowOpacity = Math.Clamp(WindowOpacity, 0.6, 1.0);
+
+        if (ResultDensity is not ("Compact" or "Standard" or "Comfortable"))
+        {
+            ResultDensity = "Standard";
+        }
+
+        if (UpdateChannel is not ("stable" or "preview"))
+        {
+            UpdateChannel = "stable";
+        }
+
+        if (DownloadMirror is not "github")
+        {
+            DownloadMirror = "github";
+        }
+
+        UpdateCheckHours = Math.Clamp(UpdateCheckHours, 0, 168);
+
         if (BenchProbeKey.Length != 1 || !char.IsAsciiDigit(BenchProbeKey[0]))
         {
             BenchProbeKey = "7";
@@ -58,5 +120,15 @@ public sealed class AppConfig
         {
             Product = Branding.ProductId;
         }
+    }
+
+    private static bool IsHexColor(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length != 7 || value[0] != '#')
+        {
+            return false;
+        }
+
+        return value.Skip(1).All(static c => Uri.IsHexDigit(c));
     }
 }

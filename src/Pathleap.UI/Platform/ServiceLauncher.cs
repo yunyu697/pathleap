@@ -87,7 +87,7 @@ internal sealed class ServiceLauncher : IDisposable
 
             Connected = true;
             StatusText = lpReply.Index is { Loaded: true }
-                ? $"服务已连接 · {lpReply.Index.EntryCount:N0} 条 · {lpReply.Index.Source}"
+                ? $"索引就绪 · {lpReply.Index.EntryCount:N0} 条 · {DescribeSource(lpReply.Index.Source)}"
                 : "服务已连接 · 索引未构建";
             AppLog.Info($"服务连接成功: mode={lpReply.Status.Mode}, pid={lpReply.Status.Pid}, uptime={lpReply.Status.UptimeMs}ms");
             return true;
@@ -98,6 +98,15 @@ internal sealed class ServiceLauncher : IDisposable
             return false;
         }
     }
+
+    private static string DescribeSource(string source) => source switch
+    {
+        "usn" => "USN 全量索引",
+        "walk" => "目录遍历索引",
+        "" => "来源未知",
+        _ when source.StartsWith("synthetic", StringComparison.OrdinalIgnoreCase) => "合成索引（性能测试数据）",
+        _ => source
+    };
 
     public void Dispose()
     {
