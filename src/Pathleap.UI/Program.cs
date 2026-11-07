@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Pathleap.Shared;
+using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
+using Pathleap.UI.Platform;
 
 namespace Pathleap.UI;
 
@@ -26,6 +28,9 @@ internal sealed class StartupOptions
 
     /// <summary>截图/调试用：--query=文本，配合 --screen=results 直接填入搜索框。</summary>
     public string Query { get; set; } = string.Empty;
+
+    /// <summary>由计划任务拉起的实例：真实参数从 pending 文件恢复，避免循环提权。</summary>
+    public bool ElevatedLaunch { get; set; }
 
     public static StartupOptions Parse(string[] args)
     {
@@ -66,6 +71,9 @@ internal sealed class StartupOptions
                     // 常驻但不显示：托盘 + 热键照常注册，不抢前台。冒烟测试与自动化用它。
                     lpOptions.ShowOnStart = false;
                     break;
+                case "--elevated-launch":
+                    lpOptions.ElevatedLaunch = true;
+                    break;
                 case "--show":
                     lpOptions.Command = "SHOW";
                     lpOptions.ShowOnStart = true;
@@ -97,6 +105,38 @@ public static class Program
         AppLog.Info($"UI {Branding.Version} 启动，PID={Environment.ProcessId}，args=[{string.Join(' ', args)}]");
         AppLog.Info($"配置: {AppPaths.ConfigFile}");
         AppLog.Info($"日志目录: {AppLog.LogDirectory}");
+
+        // 计划任务拉起的实例：真实命令行通过本地文件交接（--tray / --quit 等都在里面）。
+        if (Startup.ElevatedLaunch)
+        {
+            var lpRestored = ElevationService.ConsumePendingArgs();
+            if (lpRestored is not null)
+            {
+                Startup = StartupOptions.Parse(lpRestored);
+                Startup.ElevatedLaunch = true;
+                AppLog.Info($"已恢复提权前的命令行: [{string.Join(' ', lpRestored)}]");
+            }
+        }
+
+        // 开启「始终以管理员身份运行」时，标准权限的进程先通过计划任务拉起提权实例，
+        // 再让它按既有单实例逻辑转发命令；不写 Run 注册表项，也不需要每次 UAC 确认。
+        var lpConfig = ConfigStore.Load(AppPaths.ConfigFile);
+        if (lpConfig.AlwaysRunAsAdmin
+            && !ElevationService.IsElevated()
+            && !Startup.ElevatedLaunch
+            && Startup.Screen.Length == 0
+            && !Startup.AutoBench)
+        {
+            ElevationService.WritePendingArgs(args);
+            if (ElevationService.RunTask())
+            {
+                AppLog.Info("已通过计划任务以管理员身份重新启动。");
+                return 0;
+            }
+
+            ElevationService.ConsumePendingArgs();
+            AppLog.Warn("已开启管理员运行，但计划任务启动失败；本次按标准权限启动。");
+        }
 
         using var lpMutex = new Mutex(initiallyOwned: true, Branding.UiMutexName, out var lpCreatedNew);
         if (!lpCreatedNew)

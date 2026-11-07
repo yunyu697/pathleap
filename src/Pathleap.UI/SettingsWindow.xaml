@@ -812,6 +812,68 @@
                                                HorizontalAlignment="Right"
                                                VerticalAlignment="Center" />
                                 </Grid>
+
+                                <TextBlock Text="安装与权限"
+                                           Style="{StaticResource LpSectionLabelStyle}"
+                                           Margin="0,26,0,9" />
+                                <Border Style="{StaticResource LpCardStyle}" Padding="14,12">
+                                    <StackPanel Spacing="11">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                                <TextBlock Text="当前安装模式" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <TextBlock x:Name="InstallScopeHint"
+                                                           Text="正在读取安装信息…"
+                                                           FontSize="10.5"
+                                                           Foreground="{ThemeResource Text3Brush}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Border Grid.Column="1"
+                                                    Background="{ThemeResource Surface3Brush}"
+                                                    CornerRadius="10"
+                                                    Padding="8,3"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock x:Name="InstallScopeBadge"
+                                                           Text="—"
+                                                           FontSize="9.5"
+                                                           Foreground="{ThemeResource Text3Brush}" />
+                                            </Border>
+                                        </Grid>
+
+                                        <Border Height="1" Background="{ThemeResource Border1Brush}" />
+
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="2" VerticalAlignment="Center">
+                                                <TextBlock Text="始终以管理员身份运行" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <TextBlock Text="通过计划任务以最高权限启动；注册/取消任务各弹一次 UAC，不使用 Run 项。"
+                                                           FontSize="10.5"
+                                                           Foreground="{ThemeResource Text3Brush}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <controls:LpSwitch x:Name="ElevationSwitch" Grid.Column="1" VerticalAlignment="Center" Toggled="OnElevationToggled" />
+                                        </Grid>
+
+                                        <TextBlock x:Name="ElevationStateText"
+                                                   Text="当前进程：标准权限 · 计划任务未注册"
+                                                   FontSize="10"
+                                                   Foreground="{ThemeResource Text3Brush}"
+                                                   TextWrapping="Wrap" />
+
+                                        <Border Background="{ThemeResource Surface3Brush}" CornerRadius="7" Padding="10,8">
+                                            <TextBlock Text="提权后受 Windows UIPI 限制：普通权限的资源管理器不能向本窗口拖放文件（当前版本尚未接入拖放，接入后该限制依然存在）；全局热键、托盘与单实例转发不受影响。"
+                                                       FontSize="10"
+                                                       Foreground="{ThemeResource Text3Brush}"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Grid>
                     </ScrollViewer>

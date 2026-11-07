@@ -25,6 +25,8 @@ public sealed partial class SettingsWindow : Window
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpIndexTimer;
     private bool _lpIndexBusy;
     private string _lpCurrentPage = "appearance";
+    private bool _lpSyncingElevation;
+    private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
 
@@ -58,6 +60,12 @@ public sealed partial class SettingsWindow : Window
         AutoCheckSwitch.IsOn = _lpConfig.AutoCheckUpdates;
         FrequencyText.Text = FrequencyLabel(_lpConfig.UpdateCheckHours);
         LastCheckText.Text = FormatLastCheck(_lpConfig.LastUpdateCheck);
+
+        _lpSyncingElevation = true;
+        ElevationSwitch.IsOn = _lpConfig.AlwaysRunAsAdmin;
+        _lpSyncingElevation = false;
+        ApplyInstallInfo();
+        RefreshElevationState();
 
         ThemeService.Instance.Changed += OnThemeChanged;
         UpdateNavVisuals();
@@ -358,6 +366,87 @@ public sealed partial class SettingsWindow : Window
     {
         _lpConfig.AutoCheckUpdates = AutoCheckSwitch.IsOn;
         _lpTheme.SaveConfig();
+    }
+
+    /// <summary>安装范围来自安装包写入的注册值；便携版没有该值。</summary>
+    private void ApplyInstallInfo()
+    {
+        var lpInfo = ElevationService.ReadInstallInfo();
+        InstallScopeBadge.Text = lpInfo.ScopeLabel;
+        InstallScopeHint.Text = lpInfo.IsInstalled
+            ? $"维护者：安装包（Inno Setup） · 目录 {lpInfo.Directory} · 切换安装范围需重新运行安装包"
+            : "未通过安装包安装（便携版）；由解压目录维护，切换安装范围需运行安装包。";
+    }
+
+    private async void RefreshElevationState()
+    {
+        var lpElevated = ElevationService.IsElevated();
+        var lpTask = await Task.Run(ElevationService.TaskExists);
+        ElevationStateText.Text =
+            $"当前进程：{(lpElevated ? "管理员权限（高完整性）" : "标准权限")} · 计划任务：{(lpTask ? "已注册" : "未注册")}";
+    }
+
+    private readonly record struct ElevationTaskResult(bool Ok, string Error);
+
+    /// <summary>
+    /// 开关是真逻辑：注册/删除计划任务失败（含用户取消 UAC）时回退开关并说明原因。
+    /// 注册成功后下次启动才会走提权路径，不会立刻重启当前进程。
+    /// </summary>
+    private async void OnElevationToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingElevation || _lpElevationBusy)
+        {
+            return;
+        }
+
+        var lpEnable = ElevationSwitch.IsOn;
+        if (lpEnable == _lpConfig.AlwaysRunAsAdmin)
+        {
+            return;
+        }
+
+        _lpElevationBusy = true;
+        ElevationSwitch.IsEnabled = false;
+        ElevationStateText.Text = lpEnable ? "正在注册计划任务（可能弹出 UAC）…" : "正在删除计划任务（可能弹出 UAC）…";
+
+        var lpResult = await Task.Run(() =>
+        {
+            if (lpEnable)
+            {
+                var lpOk = ElevationService.TryCreateTask(out var lpError);
+                return new ElevationTaskResult(lpOk, lpError);
+            }
+
+            var lpRemoved = ElevationService.TryDeleteTask(out var lpRemoveError);
+            return new ElevationTaskResult(lpRemoved, lpRemoveError);
+        });
+
+        if (lpResult.Ok)
+        {
+            _lpConfig.AlwaysRunAsAdmin = lpEnable;
+            _lpTheme.SaveConfig();
+            AppLog.Info($"始终以管理员身份运行: {(lpEnable ? "已开启" : "已关闭")}");
+        }
+        else
+        {
+            _lpSyncingElevation = true;
+            ElevationSwitch.IsOn = !lpEnable;
+            _lpSyncingElevation = false;
+            AppLog.Warn($"提权设置未生效: {lpResult.Error}");
+
+            var lpDialog = new ContentDialog
+            {
+                Title = lpEnable ? "未能开启管理员运行" : "未能关闭管理员运行",
+                Content = lpResult.Error + "\n\n可以稍后重试；没有注册任务时，程序仍按标准权限启动。",
+                CloseButtonText = "知道了",
+                XamlRoot = RootGrid.XamlRoot
+            };
+            await lpDialog.ShowAsync();
+        }
+
+        _lpElevationBusy = false;
+        ElevationSwitch.IsEnabled = true;
+        RefreshElevationState();
     }
 
     private void OnFrequencyDailyClick(object sender, RoutedEventArgs e) => SetFrequency(24);

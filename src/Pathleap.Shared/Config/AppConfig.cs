@@ -42,6 +42,12 @@ public sealed class AppConfig
     /// <summary>搜索窗是否固定置顶（对应主窗口工具条上的图钉）。</summary>
     public bool PinWindow { get; set; } = true;
 
+    /// <summary>
+    /// 是否始终以管理员身份运行。开启后启动路径改为「计划任务（最高权限）」，
+    /// 不使用 Run 注册表项；任务注册/删除各需要一次 UAC。
+    /// </summary>
+    public bool AlwaysRunAsAdmin { get; set; }
+
     /// <summary>启动时自动检查更新（只做一次 HTTP 查询，不下载）。</summary>
     public bool AutoCheckUpdates { get; set; } = true;
 
