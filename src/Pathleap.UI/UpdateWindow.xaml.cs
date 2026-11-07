@@ -15,9 +15,10 @@ namespace Pathleap.UI;
 
 /// <summary>
 /// 检查更新窗（设计稿屏 4，440 × 300）：常驻「打开主页 / 检查更新」；发现版本时增加
-/// 「检查更新 / 仅下载 / 更新」与版本号、更新说明、镜像下拉；下载中只多一条进度；
-/// 仅下载完成后换成「打开下载目录 / 安装」。检查与下载都走真实 GitHub Releases；
-/// 镜像仅有一个可用源，其余在菜单标注未接入。
+/// 「检查更新 / 仅下载 / 更新」与版本号、更新说明、下载源状态；下载中只多一条进度；
+/// 仅下载完成后换成「打开下载目录 / 安装」。
+/// 检查只读公开发布仓库的 latest.json 并 Ed25519 验签；下载后校验 SHA256 才会允许安装。
+/// 只有资产是 github.com 直链时下载源才显示「官方直链」，否则明确说明镜像不可用。
 /// </summary>
 public sealed partial class UpdateWindow : Window
 {
@@ -180,15 +181,28 @@ public sealed partial class UpdateWindow : Window
         var lpAssetLine = string.IsNullOrEmpty(info.AssetName)
             ? "该版本未附带安装包。"
             : $"安装包：{info.AssetName}（{FormatBytes(info.AssetSize)}）";
+        var lpDetailLine = string.IsNullOrWhiteSpace(info.MinimumSystemText)
+            ? lpAssetLine
+            : $"{lpAssetLine} · 最低 {info.MinimumSystemText}";
         AssetInfoText.Text = info.HasUpdate
-            ? (string.IsNullOrWhiteSpace(info.Message) ? lpAssetLine : $"{lpAssetLine} · {info.Message}")
-            : $"已是最新版本。{lpAssetLine}";
+            ? (string.IsNullOrWhiteSpace(info.Message) ? lpDetailLine : $"{lpDetailLine} · {info.Message}")
+            : $"已是最新版本。{lpDetailLine}";
         AssetInfoText.Visibility = Visibility.Visible;
 
         NotesText.Text = string.IsNullOrWhiteSpace(info.Notes) ? "该版本未提供更新说明。" : info.Notes;
         NotesPanel.Visibility = Visibility.Visible;
         MirrorPanel.Visibility = Visibility.Visible;
-        MirrorLabelText.Text = "下载镜像";
+        MirrorLabelText.Text = "下载源";
+
+        // 只有 github.com 直链才保留「官方直链」；其它来源直接说明镜像不可用，不留死选项。
+        var lpHost = GetAssetHost(info.AssetUrl);
+        var lpIsGithub = string.Equals(lpHost, "github.com", StringComparison.OrdinalIgnoreCase);
+        MirrorStatusText.Text = lpIsGithub
+            ? "GitHub 官方直链"
+            : $"资产不是 github.com 直链（{lpHost}），镜像不可用";
+        MirrorStatusText.Foreground = lpIsGithub
+            ? Theme.ThemeService.Instance.Text3Brush
+            : new SolidColorBrush(Color.FromArgb(255, 217, 80, 63));
 
         HomeButton.Visibility = Visibility.Visible;
         CheckButton.Visibility = Visibility.Visible;
@@ -231,7 +245,7 @@ public sealed partial class UpdateWindow : Window
         DownloadedTitleText.Text = $"{lpVersion} 已下载完成";
         DownloadedFileName.Text = Path.GetFileName(path);
         var lpFolder = Path.GetDirectoryName(path) ?? AppPaths.UpdatesRoot;
-        DownloadedFileDetail.Text = $"{lpFolder} · {FormatBytes(SafeLength(path))}";
+        DownloadedFileDetail.Text = $"{lpFolder} · {FormatBytes(SafeLength(path))} · SHA256 已校验";
 
         HomeButton.Visibility = Visibility.Collapsed;
         CheckButton.Visibility = Visibility.Collapsed;
@@ -242,6 +256,18 @@ public sealed partial class UpdateWindow : Window
         InstallButton.Visibility = lpIsSetup ? Visibility.Visible : Visibility.Collapsed;
         InstallButton.IsEnabled = lpIsSetup;
         ResizeAndCenter();
+    }
+
+    private static string GetAssetHost(string url)
+    {
+        try
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var lpUri) ? lpUri.Host : "未知";
+        }
+        catch
+        {
+            return "未知";
+        }
     }
 
     private static long SafeLength(string path)
@@ -267,7 +293,7 @@ public sealed partial class UpdateWindow : Window
         _lpPreview = false;
         PreviewBadge.Visibility = Visibility.Collapsed;
         CheckButton.IsEnabled = false;
-        IdleLastText.Text = "正在检查 GitHub 最新版本…";
+        IdleLastText.Text = "正在读取公开发布仓库清单并验签…";
         IdleLastText.Foreground = Theme.ThemeService.Instance.Text3Brush;
 
         var lpResult = await UpdateService.CheckAsync();
@@ -387,7 +413,11 @@ public sealed partial class UpdateWindow : Window
                     "· 索引服务增加异常退出自动重启",
             AssetName = "Pathleap-1.0.2-win-x64-setup.exe",
             AssetSize = 36_700_000,
-            AssetUrl = "preview",
+            AssetUrl = "https://github.com/yunyu697/pathleap-releases/releases/download/v1.0.2/Pathleap-1.0.2-win-x64-setup.exe",
+            AssetSha256 = new string('a', 64),
+            MinimumSystemText = "Windows 10.0.17763.0 · .NET 8.0 · Windows App Runtime 2.6.5",
+            Message = "清单已验签 · 最低 Windows 10.0.17763.0",
+            SignatureVerified = true,
             HasUpdate = true
         };
 
@@ -396,7 +426,7 @@ public sealed partial class UpdateWindow : Window
             case "found":
                 _lpInfo = lpSample;
                 ShowFound(lpSample);
-                AssetInfoText.Text = "预览数据：正式检查会读取 GitHub 最新 Release。";
+                AssetInfoText.Text = "预览数据：正式检查会读取公开发布仓库 latest.json 并验签。";
                 break;
             case "downloading":
                 _lpInfo = lpSample;
@@ -412,7 +442,7 @@ public sealed partial class UpdateWindow : Window
                 DownloadedFileDetail.Text = $"{AppPaths.UpdatesRoot} · {FormatBytes(lpSample.AssetSize)}";
                 break;
             default:
-                ShowIdle("预览状态：检查逻辑会真实请求 GitHub API。");
+                ShowIdle("预览状态：检查逻辑会真实请求公开发布仓库的 latest.json。");
                 break;
         }
     }
@@ -450,7 +480,7 @@ public sealed partial class UpdateWindow : Window
     {
         if (_lpPreview)
         {
-            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会请求 GitHub Release 资源。";
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从公开发布仓库下载并校验 SHA256。";
             return;
         }
 
@@ -461,7 +491,7 @@ public sealed partial class UpdateWindow : Window
     {
         if (_lpPreview)
         {
-            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会请求 GitHub Release 资源。";
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从公开发布仓库下载并校验 SHA256。";
             return;
         }
 

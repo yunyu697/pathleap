@@ -1,95 +1,87 @@
 using System.Net.Http;
-using System.Text.Json;
+using System.Security.Cryptography;
 using Pathleap.Shared;
 using Pathleap.Shared.Diagnostics;
+using Pathleap.Shared.Update;
 
 namespace Pathleap.UI.Update;
 
 /// <summary>
-/// 更新检查与下载：直接查询 GitHub Releases（公开 API，无需凭据）。
-/// 只使用真实返回的数据；网络失败时把错误原样交给界面，不做静默伪造。
+/// 更新检查与下载：只读公开发布仓库的 <c>latest.json</c>，不携带任何令牌。
+/// 清单必须 Ed25519 验签通过；安装包必须 SHA256 逐字节校验一致，否则拒绝安装。
+/// 网络或校验失败时把原因原样交给界面，不做静默降级。
 /// </summary>
 public static class UpdateService
 {
-    private const string LatestReleaseUrl = "https://api.github.com/repos/yunyu697/pathleap/releases/latest";
-    private const string HomeUrl = "https://github.com/yunyu697/pathleap";
-
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(20)
     };
 
-    public static string HomepageUrl => HomeUrl;
+    public static string HomepageUrl => ReleaseFeed.HomeUrl;
 
     public static async Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            using var lpRequest = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUrl);
+            if (!ReleaseSigning.HasEmbeddedPublicKey)
+            {
+                return UpdateCheckResult.Failure(
+                    "客户端未内置发布公钥（ReleaseSigning.PublicKeyBase64 仍为占位值），已中止更新检查；不降级为无签名安装。");
+            }
+
+            using var lpRequest = new HttpRequestMessage(HttpMethod.Get, ReleaseFeed.ManifestUrl);
             lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
-            lpRequest.Headers.Accept.ParseAdd("application/vnd.github+json");
+            lpRequest.Headers.Accept.ParseAdd("application/json, text/plain");
 
             using var lpResponse = await Http.SendAsync(lpRequest, cancellationToken).ConfigureAwait(false);
             if (!lpResponse.IsSuccessStatusCode)
             {
-                return UpdateCheckResult.Failure($"GitHub 返回 HTTP {(int)lpResponse.StatusCode}");
+                var lpStatus = (int)lpResponse.StatusCode;
+                var lpMessage = lpStatus == 404
+                    ? $"公开发布仓库暂无最新清单（HTTP 404）：{ReleaseFeed.ManifestUrl}"
+                    : $"发布仓库返回 HTTP {lpStatus}";
+                AppLog.Warn($"更新检查失败: {lpMessage}");
+                return UpdateCheckResult.Failure(lpMessage);
             }
 
             var lpJson = await lpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using var lpDocument = JsonDocument.Parse(lpJson);
-            var lpRoot = lpDocument.RootElement;
+            var lpManifest = LatestManifest.Parse(lpJson);
+            lpManifest.Validate();
 
-            var lpTag = lpRoot.TryGetProperty("tag_name", out var lpTagElement) ? lpTagElement.GetString() ?? string.Empty : string.Empty;
-            var lpNotes = lpRoot.TryGetProperty("body", out var lpBodyElement) ? lpBodyElement.GetString() ?? string.Empty : string.Empty;
-
-            var lpAssetName = string.Empty;
-            var lpAssetSize = 0L;
-            var lpAssetUrl = string.Empty;
-            if (lpRoot.TryGetProperty("assets", out var lpAssets) && lpAssets.ValueKind == JsonValueKind.Array)
+            if (!ReleaseSigning.Verify(lpManifest))
             {
-                foreach (var lpAsset in lpAssets.EnumerateArray())
-                {
-                    var lpName = lpAsset.TryGetProperty("name", out var lpNameElement) ? lpNameElement.GetString() ?? string.Empty : string.Empty;
-                    if (lpName.EndsWith("-setup.exe", StringComparison.OrdinalIgnoreCase))
-                    {
-                        lpAssetName = lpName;
-                        lpAssetSize = lpAsset.TryGetProperty("size", out var lpSizeElement) ? lpSizeElement.GetInt64() : 0;
-                        lpAssetUrl = lpAsset.TryGetProperty("browser_download_url", out var lpUrlElement) ? lpUrlElement.GetString() ?? string.Empty : string.Empty;
-                        break;
-                    }
-                }
-
-                // 没有安装包时回退到便携 zip；安装按钮会在界面上标注不可用。
-                if (string.IsNullOrEmpty(lpAssetName))
-                {
-                    foreach (var lpAsset in lpAssets.EnumerateArray())
-                    {
-                        var lpName = lpAsset.TryGetProperty("name", out var lpNameElement) ? lpNameElement.GetString() ?? string.Empty : string.Empty;
-                        if (lpName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                        {
-                            lpAssetName = lpName;
-                            lpAssetSize = lpAsset.TryGetProperty("size", out var lpSizeElement) ? lpSizeElement.GetInt64() : 0;
-                            lpAssetUrl = lpAsset.TryGetProperty("browser_download_url", out var lpUrlElement) ? lpUrlElement.GetString() ?? string.Empty : string.Empty;
-                            break;
-                        }
-                    }
-                }
+                AppLog.Warn($"更新清单验签失败: version={lpManifest.Version}");
+                return UpdateCheckResult.Failure("更新清单验签失败：内容可能被篡改或公钥不匹配，已中止（不降级）。");
             }
 
-            var lpRemoteVersion = lpTag.TrimStart('v', 'V');
-            var lpHasUpdate = CompareVersion(lpRemoteVersion, Branding.Version) > 0;
-            AppLog.Info($"更新检查完成: remote={lpRemoteVersion} local={Branding.Version} update={lpHasUpdate} asset={lpAssetName}");
+            var lpAsset = lpManifest.PreferredAsset;
+            if (lpAsset is null)
+            {
+                return UpdateCheckResult.Failure("清单未包含可用的安装包或便携包资产。");
+            }
+
+            var lpHasUpdate = SemanticVersion.IsNewer(lpManifest.Version, Branding.Version);
+            AppLog.Info(
+                $"更新检查完成: remote={lpManifest.Version} local={Branding.Version} update={lpHasUpdate} "
+                + $"asset={lpAsset.Name} signature=ok");
 
             return new UpdateCheckResult
             {
                 Ok = true,
-                RemoteTag = lpTag,
-                RemoteVersion = lpRemoteVersion,
-                Notes = lpNotes,
-                AssetName = lpAssetName,
-                AssetSize = lpAssetSize,
-                AssetUrl = lpAssetUrl,
-                HasUpdate = lpHasUpdate
+                SignatureVerified = true,
+                RemoteTag = lpManifest.Tag,
+                RemoteVersion = lpManifest.Version,
+                Notes = lpManifest.Notes,
+                AssetName = lpAsset.Name,
+                AssetSize = lpAsset.Size,
+                AssetUrl = lpAsset.Url,
+                AssetSha256 = lpAsset.Sha256,
+                MinimumSystemText =
+                    $"Windows {lpManifest.MinimumSystem.Windows} · .NET {lpManifest.MinimumSystem.DotnetDesktop} · "
+                    + $"Windows App Runtime {lpManifest.MinimumSystem.WindowsAppRuntime}",
+                HasUpdate = lpHasUpdate,
+                Message = $"清单已验签 · 最低 Windows {lpManifest.MinimumSystem.Windows}"
             };
         }
         catch (Exception ex)
@@ -99,12 +91,21 @@ public static class UpdateService
         }
     }
 
+    /// <summary>下载并逐字节校验 SHA256；不一致或大小不符时删除临时文件并抛出，绝不启动安装。</summary>
     public static async Task DownloadAsync(
         UpdateCheckResult info,
         string destinationPath,
         Action<long, long> progress,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(info.AssetSha256))
+        {
+            throw new InvalidOperationException("清单未提供 SHA256，拒绝下载。");
+        }
+
+        var lpExpectedHash = info.AssetSha256.ToLowerInvariant();
+        var lpPartial = destinationPath + ".part";
+
         using var lpRequest = new HttpRequestMessage(HttpMethod.Get, info.AssetUrl);
         lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
 
@@ -119,60 +120,61 @@ public static class UpdateService
         }
 
         await using var lpSource = await lpResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var lpTarget = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+        using var lpHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
         var lpBuffer = new byte[81920];
         var lpReceived = 0L;
         var lpLastReport = 0L;
-        while (true)
+
+        // 先把字节写入 .part，校验通过后再改名，避免半成品进入下载目录。
+        await using (var lpTarget = new FileStream(lpPartial, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
         {
-            var lpRead = await lpSource.ReadAsync(lpBuffer, cancellationToken).ConfigureAwait(false);
-            if (lpRead <= 0)
+            while (true)
             {
-                break;
+                var lpRead = await lpSource.ReadAsync(lpBuffer, cancellationToken).ConfigureAwait(false);
+                if (lpRead <= 0)
+                {
+                    break;
+                }
+
+                lpHash.AppendData(lpBuffer, 0, lpRead);
+                await lpTarget.WriteAsync(lpBuffer.AsMemory(0, lpRead), cancellationToken).ConfigureAwait(false);
+                lpReceived += lpRead;
+                if (lpReceived - lpLastReport > 256 * 1024)
+                {
+                    lpLastReport = lpReceived;
+                    progress(lpReceived, lpTotal);
+                }
             }
 
-            await lpTarget.WriteAsync(lpBuffer.AsMemory(0, lpRead), cancellationToken).ConfigureAwait(false);
-            lpReceived += lpRead;
-            if (lpReceived - lpLastReport > 256 * 1024)
-            {
-                lpLastReport = lpReceived;
-                progress(lpReceived, lpTotal);
-            }
+            progress(lpReceived, lpTotal);
         }
 
-        progress(lpReceived, lpTotal);
+        var lpActualHash = Convert.ToHexString(lpHash.GetHashAndReset()).ToLowerInvariant();
+        if (lpReceived != info.AssetSize || lpActualHash != lpExpectedHash)
+        {
+            TryDelete(lpPartial);
+            throw new InvalidOperationException(
+                $"安装包校验失败（大小 {lpReceived}/{info.AssetSize}，SHA256 {lpActualHash}，期望 {lpExpectedHash}），已删除下载文件并拒绝安装。");
+        }
+
+        File.Move(lpPartial, destinationPath, overwrite: true);
+        AppLog.Info($"已下载并校验安装包: {destinationPath} sha256={lpActualHash}");
     }
 
-    /// <summary>语义版本比较；只比较数字段，后缀按预发布规则视为更旧。</summary>
-    private static int CompareVersion(string left, string right)
+    private static void TryDelete(string path)
     {
-        var lpLeft = ParseParts(left);
-        var lpRight = ParseParts(right);
-        var lpMax = Math.Max(lpLeft.Count, lpRight.Count);
-        for (var lpIndex = 0; lpIndex < lpMax; lpIndex++)
+        try
         {
-            var lpL = lpIndex < lpLeft.Count ? lpLeft[lpIndex] : 0;
-            var lpR = lpIndex < lpRight.Count ? lpRight[lpIndex] : 0;
-            if (lpL != lpR)
+            if (File.Exists(path))
             {
-                return lpL > lpR ? 1 : -1;
+                File.Delete(path);
             }
         }
-
-        return 0;
-    }
-
-    private static List<int> ParseParts(string version)
-    {
-        var lpClean = version.Split('-', '+')[0];
-        var lpParts = new List<int>();
-        foreach (var lpPart in lpClean.Split('.'))
+        catch (Exception ex)
         {
-            lpParts.Add(int.TryParse(lpPart, out var lpValue) ? lpValue : 0);
+            AppLog.Warn($"删除未通过校验的下载文件失败: {ex.Message}");
         }
-
-        return lpParts;
     }
 }
 
@@ -181,6 +183,8 @@ public sealed class UpdateCheckResult
     public bool Ok { get; init; }
 
     public string Message { get; init; } = string.Empty;
+
+    public bool SignatureVerified { get; init; }
 
     public string RemoteTag { get; init; } = string.Empty;
 
@@ -193,6 +197,10 @@ public sealed class UpdateCheckResult
     public long AssetSize { get; init; }
 
     public string AssetUrl { get; init; } = string.Empty;
+
+    public string AssetSha256 { get; init; } = string.Empty;
+
+    public string MinimumSystemText { get; init; } = string.Empty;
 
     public bool HasUpdate { get; init; }
 

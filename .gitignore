@@ -12,6 +12,9 @@ obj/
 # 本地打包产物
 dist/
 
+# 发布签名密钥（只应保存在发布流水线 secret 中，不得入库）
+/release-keys/
+
 # IDE / 工具
 .vs/
 .vscode/

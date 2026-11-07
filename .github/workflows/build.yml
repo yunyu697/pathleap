@@ -52,6 +52,10 @@ jobs:
         shell: pwsh
         run: ./tools/Test-LpVariableNames.ps1
 
+      - name: 发布工具自检（Ed25519 / 语义化版本 / 清单签名）
+        shell: pwsh
+        run: dotnet run --project src/Pathleap.ReleaseTool -- selftest
+
       - name: 编译 Release x64（UI / Service / Shared）
         shell: pwsh
         run: ./tools/Build-Lp.ps1 -LpConfiguration Release -LpSkipVariableCheck -LpVersion '${{ steps.lpver.outputs.version }}'
@@ -115,3 +119,69 @@ jobs:
           else {
             gh release create $LpTag @LpAssets --title "Pathleap $LpTag" --generate-notes
           }
+
+      # 公开发布仓库只放产物与签名清单；源码仓库保持私有。
+      # 客户端只读 https://github.com/<owner>/pathleap-releases/releases/latest/download/latest.json，不带令牌。
+      # 令牌或签名密钥缺失时明确跳过（warning annotation），不静默失败。
+      - name: 发布到公开发布仓库（构建产物 + 签名 latest.json）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          LP_RELEASES_TOKEN: ${{ secrets.PATHLEAP_RELEASES_PAT }}
+          LP_SIGNING_KEY: ${{ secrets.PATHLEAP_SIGNING_KEY }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $LpPublicRepo = 'yunyu697/pathleap-releases'
+
+          if ([string]::IsNullOrWhiteSpace($env:LP_RELEASES_TOKEN) -or [string]::IsNullOrWhiteSpace($env:LP_SIGNING_KEY)) {
+            $LpMissing = if ([string]::IsNullOrWhiteSpace($env:LP_RELEASES_TOKEN)) { 'PATHLEAP_RELEASES_PAT' } else { 'PATHLEAP_SIGNING_KEY' }
+            Write-Warning "未配置 $LpMissing，跳过公开发布仓库发布（不是构建失败）。"
+            Write-Host "::warning title=公开发布仓库未发布::缺少 $LpMissing；本次 tag 的产物仅在私有 Release 与构建 artifact 中。"
+            exit 0
+          }
+
+          $LpTag = "${{ github.ref_name }}"
+          $LpVersion = $LpTag.Substring(1)
+          $LpZip = (Get-ChildItem -Path dist -Filter '*.zip' -File | Select-Object -First 1).FullName
+          $LpSetup = (Get-ChildItem -Path dist -Filter '*-setup.exe' -File | Select-Object -First 1).FullName
+          if (-not $LpZip -or -not $LpSetup) { throw '缺少便携包或安装包，无法发布' }
+
+          $env:GH_TOKEN = $env:LP_RELEASES_TOKEN
+          gh auth status -h github.com
+          if ($LASTEXITCODE -ne 0) { throw 'PATHLEAP_RELEASES_PAT 无效或已过期' }
+
+          $LpNotesFile = "docs/$LpVersion-发布说明.md"
+          gh release view $LpTag -R $LpPublicRepo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $LpTag $LpZip $LpSetup -R $LpPublicRepo --clobber
+            if ($LASTEXITCODE -ne 0) { throw '上传产物到公开发布仓库失败' }
+            if (Test-Path -LiteralPath $LpNotesFile) {
+              gh release edit $LpTag -R $LpPublicRepo --notes-file $LpNotesFile
+            }
+          }
+          elseif (Test-Path -LiteralPath $LpNotesFile) {
+            gh release create $LpTag $LpZip $LpSetup -R $LpPublicRepo --title "Pathleap $LpTag" --notes-file $LpNotesFile
+            if ($LASTEXITCODE -ne 0) { throw '在公开发布仓库创建 Release 失败（仓库是否存在？）' }
+          }
+          else {
+            gh release create $LpTag $LpZip $LpSetup -R $LpPublicRepo --title "Pathleap $LpTag" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw '在公开发布仓库创建 Release 失败（仓库是否存在？）' }
+          }
+
+          $LpKeyFile = Join-Path $env:RUNNER_TEMP 'lp-signing-seed.b64'
+          Set-Content -LiteralPath $LpKeyFile -Value $env:LP_SIGNING_KEY.Trim() -NoNewline -Encoding ascii
+
+          dotnet run --project src/Pathleap.ReleaseTool -- create `
+            --version $LpVersion --tag $LpTag `
+            --released-at ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+            --notes-file $LpNotesFile `
+            --installer $LpSetup --portable $LpZip `
+            --out dist/latest.json --seed-file $LpKeyFile
+          if ($LASTEXITCODE -ne 0) { throw '生成并签名 latest.json 失败' }
+
+          dotnet run --project src/Pathleap.ReleaseTool -- verify --manifest dist/latest.json
+          if ($LASTEXITCODE -ne 0) { throw 'latest.json 验签失败，拒绝发布' }
+
+          gh release upload $LpTag dist/latest.json -R $LpPublicRepo --clobber
+          if ($LASTEXITCODE -ne 0) { throw '上传 latest.json 失败' }
+          Write-Host "已发布到 $LpPublicRepo：$LpTag（latest.json 已验签）"

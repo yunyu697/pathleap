@@ -248,30 +248,18 @@
                             <FontIcon Glyph="&#xE896;" FontSize="12" Foreground="{ThemeResource Text3Brush}" VerticalAlignment="Center" />
                             <TextBlock x:Name="MirrorLabelText"
                                        Grid.Column="1"
-                                       Text="下载镜像"
+                                       Text="下载源"
                                        FontSize="9.5"
                                        Foreground="{ThemeResource Text2Brush}"
                                        VerticalAlignment="Center" />
-                            <Button Grid.Column="2"
-                                    Background="{ThemeResource SurfaceBrush}"
-                                    BorderBrush="{ThemeResource Border2Brush}"
-                                    BorderThickness="1"
-                                    CornerRadius="5"
-                                    Height="22"
-                                    Padding="7,0"
-                                    FontSize="9.5"
-                                    Foreground="{ThemeResource Text2Brush}">
-                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                    <TextBlock Text="GitHub 官方" FontSize="9.5" />
-                                    <FontIcon Glyph="&#xE70D;" FontSize="8" />
-                                </StackPanel>
-                                <Button.Flyout>
-                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                        <MenuFlyoutItem Text="GitHub 官方（当前）" IsEnabled="False" />
-                                        <MenuFlyoutItem Text="镜像（未接入）" IsEnabled="False" />
-                                    </MenuFlyout>
-                                </Button.Flyout>
-                            </Button>
+                            <!-- 不再保留点了没效果的镜像下拉：只有 github.com 直链才显示「官方直链」，
+                                 其它来源直接说明镜像不可用（文案由代码按资产 host 设置）。 -->
+                            <TextBlock x:Name="MirrorStatusText"
+                                       Grid.Column="2"
+                                       Text="GitHub 官方直链"
+                                       FontSize="9.5"
+                                       Foreground="{ThemeResource Text3Brush}"
+                                       VerticalAlignment="Center" />
                         </Grid>
 
                         <TextBlock x:Name="AssetInfoText"

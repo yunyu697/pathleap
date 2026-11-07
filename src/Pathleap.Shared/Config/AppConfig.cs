@@ -60,9 +60,6 @@ public sealed class AppConfig
     /// <summary>更新通道：stable / preview（preview 未接入，界面会标注）。</summary>
     public string UpdateChannel { get; set; } = "stable";
 
-    /// <summary>下载镜像：github（当前唯一可用）。</summary>
-    public string DownloadMirror { get; set; } = "github";
-
     /// <summary>上次检查更新的时间（ISO 8601），供界面展示。</summary>
     public string LastUpdateCheck { get; set; } = string.Empty;
 
@@ -125,11 +122,6 @@ public sealed class AppConfig
         if (UpdateChannel is not ("stable" or "preview"))
         {
             UpdateChannel = "stable";
-        }
-
-        if (DownloadMirror is not "github")
-        {
-            DownloadMirror = "github";
         }
 
         UpdateCheckHours = Math.Clamp(UpdateCheckHours, 0, 168);
