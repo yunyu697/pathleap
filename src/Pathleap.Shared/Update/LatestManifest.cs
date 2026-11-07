@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using Pathleap.Shared.Ipc;
 
 namespace Pathleap.Shared.Update;
@@ -31,6 +32,7 @@ public sealed class LatestManifest
 
     public string Signature { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public ManifestAsset? PreferredAsset =>
         Assets.TryGetValue(ReleaseFeed.AssetInstaller, out var lpInstaller) && lpInstaller.IsUsable
             ? lpInstaller
@@ -38,6 +40,7 @@ public sealed class LatestManifest
                 ? lpPortable
                 : null;
 
+    [JsonIgnore]
     public bool HasPortableAsset =>
         Assets.TryGetValue(ReleaseFeed.AssetPortable, out var lpPortable) && lpPortable.IsUsable;
 
@@ -148,6 +151,7 @@ public sealed class ManifestAsset
 
     public string Url { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public bool IsUsable =>
         !string.IsNullOrWhiteSpace(Name)
         && !string.IsNullOrWhiteSpace(Sha256)
