@@ -53,17 +53,37 @@ GitHub Release 同时提供：
 | 产物 | 形式 | 适用场景 | 与另一种的差异 |
 | --- | --- | --- | --- |
 | `Pathleap-<版本>-win-x64.zip` | 便携版 | 解压即用、绿色部署、放到 U 盘或受控目录 | 不写注册表、不建快捷方式、不产生卸载项；升级/删除需手动覆盖或删目录 |
-| `Pathleap-<版本>-win-x64-setup.exe` | 安装包（Inno Setup） | 普通用户安装 | 可选择安装目录；创建开始菜单快捷方式，桌面快捷方式为可选任务；写入当前用户卸载项；卸载时移除程序与快捷方式 |
+| `Pathleap-<版本>-win-x64-setup.exe` | 安装包（Inno Setup） | 需要快捷方式/卸载项的用户 | 安装范围二选一（见下表）；可选择安装目录；创建开始菜单快捷方式，桌面快捷方式为可选任务；按范围写入用户级或机器级卸载项 |
 
-安装包按**当前用户**安装（默认 `%LOCALAPPDATA%\Programs\Pathleap`），不需要 UAC；安装完成可选择立即启动 UI。
-UI 启动后会按配置 `startServiceWithUi` 自动拉起同目录的 `Pathleap.Service.exe --console`，不需要单独启动服务。
+安装包在向导第一步显式选择安装范围，**默认「仅为我安装」**（推荐），也可以选「为所有用户安装」：
+
+| 项 | 仅当前用户（默认） | 为所有用户安装 |
+| --- | --- | --- |
+| 安装目录 | `%LOCALAPPDATA%\Programs\Pathleap`（可改） | `C:\Program Files\Pathleap`（可改） |
+| 权限 | 不需要 UAC | 需要管理员权限，安装前弹 UAC |
+| 开始菜单 | 当前用户开始菜单 | 公共开始菜单（All Users） |
+| 卸载项 | `HKCU\...\Uninstall` | `HKLM\...\Uninstall` |
+| 数据 / 日志 / 索引 | `%LOCALAPPDATA%\Pathleap`（当前用户） | 仍然按用户隔离，各用户各自一份 |
+| 开机自启 | 无（当前版本没有自启功能，不写 Run 项） | 无（同上，不写机器级 Run 项） |
+| 服务 | 由 UI 拉起同目录子进程 | 同左，**不注册 SCM 服务** |
+
+默认值取「仅当前用户」的理由：不需要提权，也不会把程序写进机器级目录，降低误装与被替换的风险；只有多人共用同一台机器时才需要「所有用户」。
+数据不跟随安装范围：索引反映每个用户自己可见的文件，机器级共用会泄露他人的文件列表，所以两种模式的数据、日志、索引都按用户隔离。
+安装范围写入 `HKLM\Software\Pathleap` 或 `HKCU\Software\Pathleap` 的 `InstallScope` 值（64 位视图），设置界面据此显示当前模式。
+
+安装完成可选择立即启动 UI（以原用户身份启动，不继承安装时的提权）；UI 会按配置 `startServiceWithUi` 自动拉起同目录的
+`Pathleap.Service.exe --console`，不需要单独启动服务。
+
+**静默安装/卸载**：`Pathleap-<版本>-win-x64-setup.exe /VERYSILENT /ALLUSERS` 或 `/CURRENTUSER`；卸载用安装目录下的
+`unins000.exe /VERYSILENT`。所有用户模式的卸载需要提权。
 
 **卸载与用户数据取舍**：
 
-- 程序文件、开始菜单/桌面快捷方式、卸载注册项一律清除。
+- 程序文件、开始菜单/桌面快捷方式、卸载注册项一律清除；安装范围注册值一并删除。
 - 配置、日志、索引缓存（`%LOCALAPPDATA%\Pathleap`）**默认保留**：升级或重装后可以直接沿用索引与配置。
-- 交互式卸载会询问「是否同时删除个人配置、日志与索引缓存」；选「是」才删除该目录。静默卸载默认保留。
-- 需要彻底清理时，请先退出 Pathleap，再删除 `%LOCALAPPDATA%\Pathleap` 即可。
+- 交互式卸载会询问「是否同时删除当前用户的配置、日志与索引缓存」；选「是」才删除该目录。静默卸载默认保留。
+- 「所有用户」模式只删除**执行卸载的这位用户**的数据，其他用户的数据保留。
+- 需要彻底清理时，请先退出 Pathleap，再删除各用户的 `%LOCALAPPDATA%\Pathleap` 即可。
 
 ### 2.2 运行前提
 
@@ -72,7 +92,7 @@ UI 启动后会按配置 `startServiceWithUi` 自动拉起同目录的 `Pathleap
 | 系统 | Windows 10/11 x64 | 安装包声明 `x64compatible` |
 | .NET | .NET 8 Desktop Runtime | 当前产物是框架依赖构建，未自带运行时 |
 | Windows App SDK | Windows App Runtime 2.6.5 | UI 是 unpackaged WinUI 3 应用 |
-| 管理员 | **非必需** | 非管理员可正常搜索；USN 主路径需要管理员或 LocalSystem，非管理员 `auto` 会降级目录遍历 |
+| 管理员 | **运行非必需**；仅「所有用户」安装需要 | 非管理员可正常搜索；USN 主路径需要管理员或 LocalSystem，非管理员 `auto` 会降级目录遍历 |
 | 构建环境 | .NET 8 SDK（不需要 Visual Studio） | 见 §6 |
 
 ### 2.3 首次使用：需要先建索引
