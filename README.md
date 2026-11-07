@@ -211,7 +211,7 @@ pwsh -File .\tools\Package-LpInstaller.ps1
 `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`、`%ProgramFiles%\Inno Setup 6\ISCC.exe`。
 
 CI（`.github/workflows/build.yml`）：main/PR 构建并上传 `Pathleap-<版本>-win-x64` 产物（zip + setup）；
-tag `v<版本>` 触发时额外创建/更新 GitHub Release，同时挂上 zip 与 setup，并校验 tag 与版本号一致。
+tag `v<版本>` 触发时以 tag 版本注入构建，并额外创建/更新 GitHub Release，同时挂上 zip 与 setup。
 
 ## 7. 版本号规则
 
