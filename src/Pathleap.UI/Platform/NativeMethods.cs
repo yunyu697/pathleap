@@ -278,6 +278,12 @@ internal static class NativeMethods
     public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint virtualKey);
 
     [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetTimer(IntPtr hwnd, IntPtr id, uint elapse, IntPtr timerProcedure);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool KillTimer(IntPtr hwnd, IntPtr id);
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
 
     [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]

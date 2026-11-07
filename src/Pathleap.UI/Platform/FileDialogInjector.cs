@@ -13,6 +13,14 @@ public sealed record FileDialogInfo(IntPtr Handle, string Title, string Kind)
     public bool IsFileDialog => IsValid && Kind.Length > 0;
 }
 
+/// <summary>窗口在屏幕坐标系里的可见外框（已扣除 DWM 阴影）。</summary>
+public readonly record struct ScreenBounds(int Left, int Top, int Right, int Bottom)
+{
+    public int Width => Math.Max(0, Right - Left);
+
+    public int Height => Math.Max(0, Bottom - Top);
+}
+
 /// <summary>
 /// 标准 Windows 文件对话框（打开 / 另存为 / 选择文件夹）注入。
 /// 只处理窗口类 <c>#32770</c> 的系统对话框；自绘的第三方选择器不在此列，注入前会用标题白名单校验，
@@ -55,6 +63,9 @@ internal static class FileDialogInjector
     [DllImport("user32.dll")]
     private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessageW(IntPtr hwnd, uint message, IntPtr wParam, string lParam);
 
@@ -79,10 +90,47 @@ internal static class FileDialogInjector
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 
+    private const int DwmwaExtendedFrameBounds = 9;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out NativeMethods.Rect value, int size);
+
     private delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
+
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
     /// <summary>在热键触发时调用：记录当前前台的文件对话框（此时浮层还没抢走前台）。</summary>
     public static FileDialogInfo CaptureActive() => Describe(GetForegroundWindow());
+
+    /// <summary>枚举当前所有可见、受支持的文件对话框（用于多对话框各自挂一条栏）。</summary>
+    public static List<FileDialogInfo> EnumerateFileDialogs()
+    {
+        var lpResult = new List<FileDialogInfo>();
+        EnumWindows((hwnd, _) =>
+        {
+            var lpInfo = Describe(hwnd);
+            if (lpInfo.IsFileDialog)
+            {
+                lpResult.Add(lpInfo);
+            }
+
+            return true;
+        }, IntPtr.Zero);
+        return lpResult;
+    }
+
+    /// <summary>读取对话框的实际可见边界：优先 DWM 扩展外框，避免把阴影算进尺寸。</summary>
+    public static ScreenBounds GetFrameBounds(IntPtr hwnd)
+    {
+        NativeMethods.Rect lpRect;
+        if (DwmGetWindowAttribute(hwnd, DwmwaExtendedFrameBounds, out lpRect, Marshal.SizeOf<NativeMethods.Rect>()) == 0
+            || GetWindowRect(hwnd, out lpRect))
+        {
+            return new ScreenBounds(lpRect.Left, lpRect.Top, lpRect.Right, lpRect.Bottom);
+        }
+
+        return new ScreenBounds(0, 0, 0, 0);
+    }
 
     public static FileDialogInfo Describe(IntPtr hwnd)
     {

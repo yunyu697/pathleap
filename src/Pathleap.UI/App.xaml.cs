@@ -19,7 +19,10 @@ public partial class App : Application
     private ServiceLauncher? _lpService;
     private SettingsWindow? _lpSettingsWindow;
     private UpdateWindow? _lpUpdateWindow;
-    private QuickSwitchWindow? _lpQuickWindow;
+    private readonly Dictionary<nint, QuickSwitchWindow> _lpQuickBars = new();
+    private QuickSwitchWindow? _lpDetachedBar;
+    private FileDialogWatcher? _lpDialogWatcher;
+    private QuickSwitchWindow? _lpKeyboardBar;
     private TrayMenuWindow? _lpTrayMenu;
     private AboutWindow? _lpAboutWindow;
     private HotkeySpec _lpHotkey = HotkeySpec.Default;
@@ -134,6 +137,9 @@ public partial class App : Application
                 AppLog.Warn(lpQuickMessage);
                 _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 快速切换热键不可用", lpQuickMessage);
             }
+
+            StartDialogWatcher();
+            _lpNativeHost.KeyInterceptor = InterceptQuickBarKey;
 
             if (lpScreenMode)
             {
@@ -452,30 +458,236 @@ public partial class App : Application
 
     private void OpenQuickSwitch()
     {
-        // 必须赶在浮层抢前台之前记录对话框；Ctrl+G 触发时前台仍是用户的打开/保存对话框。
-        var lpDialog = FileDialogInjector.CaptureActive();
+        // 必须赶在栏拿走前台之前记录对话框；Ctrl+G 触发时前台仍是用户的打开/保存对话框。
+        var lpForeground = FileDialogInjector.CaptureActive();
+        var lpDialogs = FileDialogInjector.EnumerateFileDialogs();
 
-        if (_lpQuickWindow is null)
+        if (lpDialogs.Count == 0)
         {
-            var lpWindow = new QuickSwitchWindow(_lpConfig);
-            lpWindow.Closed += (_, _) =>
+            ShowDetachedQuickBar();
+            AppLog.Info("快速切换栏已以预览形态打开（未检测到文件对话框）。");
+            RunQuickPick();
+            return;
+        }
+
+        // 每个对话框各自一条栏，互不叠加；Ctrl+G 只激活当前前台对话框对应的那条。
+        QuickSwitchWindow? lpTarget = null;
+        foreach (var lpDialog in lpDialogs)
+        {
+            var lpBar = EnsureQuickBar(lpDialog);
+            if (lpForeground.IsFileDialog && lpDialog.Handle == lpForeground.Handle)
             {
-                lpWindow.PrepareShutdown();
-                _lpQuickWindow = null;
-            };
-            _lpQuickWindow = lpWindow;
+                lpTarget = lpBar;
+            }
         }
 
-        _lpQuickWindow.ShowAtCursor(lpDialog);
-        AppLog.Info(lpDialog.IsFileDialog
-            ? $"快速切换浮层已打开（对话框={lpDialog.Kind}，title={lpDialog.Title}）"
-            : "快速切换浮层已打开（未检测到文件对话框）");
-
-        if (Program.Startup.QuickPick > 0)
+        lpTarget ??= _lpQuickBars.TryGetValue(lpDialogs[0].Handle, out var lpFirst) ? lpFirst : null;
+        if (lpTarget is not null)
         {
-            var lpPick = Program.Startup.QuickPick - 1;
-            _lpQuickWindow.DispatcherQueue.TryEnqueue(() => _lpQuickWindow.PickForTest(lpPick));
+            ActivateQuickBar(lpTarget);
         }
+
+        AppLog.Info($"快速切换栏已打开（对话框 {lpDialogs.Count} 个，当前={(lpForeground.IsFileDialog ? lpForeground.Kind : "未知")}）。");
+        RunQuickPick();
+    }
+
+    private void RunQuickPick()
+    {
+        if (Program.Startup.QuickPick <= 0)
+        {
+            return;
+        }
+
+        var lpIndex = Program.Startup.QuickPick - 1;
+        var lpBar = Volatile.Read(ref _lpKeyboardBar) ?? _lpDetachedBar;
+        lpBar?.DispatcherQueue.TryEnqueue(() => lpBar.PickByIndex(lpIndex));
+    }
+
+    private QuickSwitchWindow EnsureQuickBar(FileDialogInfo dialog)
+    {
+        _lpDialogWatcher?.Track(dialog.Handle);
+
+        if (_lpQuickBars.TryGetValue(dialog.Handle, out var lpExisting))
+        {
+            lpExisting.Attach(dialog);
+            return lpExisting;
+        }
+
+        var lpWindow = new QuickSwitchWindow(_lpConfig);
+        _lpQuickBars[dialog.Handle] = lpWindow;
+        lpWindow.KeyboardEnded += () =>
+            Dispatch(() =>
+            {
+                if (Volatile.Read(ref _lpKeyboardBar) == lpWindow)
+                {
+                    Volatile.Write(ref _lpKeyboardBar, null);
+                }
+            });
+        lpWindow.BarClosed += () =>
+            Dispatch(() => RemoveQuickBar(dialog.Handle, lpWindow));
+        lpWindow.Attach(dialog);
+        AppLog.Info($"快速切换栏已挂到对话框: kind={dialog.Kind} handle=0x{dialog.Handle.ToInt64():X}");
+        return lpWindow;
+    }
+
+    private void RemoveQuickBar(IntPtr handle, QuickSwitchWindow bar)
+    {
+        if (_lpQuickBars.TryGetValue(handle, out var lpCurrent) && lpCurrent == bar)
+        {
+            _lpQuickBars.Remove(handle);
+        }
+
+        if (Volatile.Read(ref _lpKeyboardBar) == bar)
+        {
+            Volatile.Write(ref _lpKeyboardBar, null);
+        }
+
+        bar.CloseSafely();
+    }
+
+    private void ShowDetachedQuickBar()
+    {
+        if (_lpDetachedBar is null)
+        {
+            _lpDetachedBar = new QuickSwitchWindow(_lpConfig);
+            _lpDetachedBar.BarClosed += () => Dispatch(() => _lpDetachedBar = null);
+        }
+
+        var lpHwnd = _lpWindow is null ? IntPtr.Zero : WinRT.Interop.WindowNative.GetWindowHandle(_lpWindow);
+        _lpDetachedBar.ShowDetached(lpHwnd);
+    }
+
+    private void StartDialogWatcher()
+    {
+        if (_lpDialogWatcher is not null)
+        {
+            return;
+        }
+
+        _lpDialogWatcher = new FileDialogWatcher();
+        _lpDialogWatcher.DialogAppeared += info => EnsureQuickBar(info);
+        _lpDialogWatcher.DialogDestroyed += handle =>
+        {
+            if (_lpQuickBars.TryGetValue(handle, out var lpBar))
+            {
+                RemoveQuickBar(handle, lpBar);
+            }
+        };
+        _lpDialogWatcher.DialogGeometryChanged += handle =>
+        {
+            if (_lpQuickBars.TryGetValue(handle, out var lpBar))
+            {
+                lpBar.Reposition();
+            }
+        };
+        _lpDialogWatcher.ForegroundChanged += handle =>
+        {
+            PruneDeadBars();
+            UpdateKeyboardBarForForeground(handle);
+        };
+
+        // 启动前已经打开的文件对话框也要补上栏。
+        foreach (var lpDialog in FileDialogInjector.EnumerateFileDialogs())
+        {
+            _lpDialogWatcher.Track(lpDialog.Handle);
+            EnsureQuickBar(lpDialog);
+        }
+    }
+
+    /// <summary>兜底清理：对话框进程异常退出、没收到销毁事件时，前台变化时顺手把死栏撤掉。</summary>
+    private void PruneDeadBars()
+    {
+        if (_lpQuickBars.Count == 0)
+        {
+            return;
+        }
+
+        var lpDead = new List<nint>();
+        foreach (var lpPair in _lpQuickBars)
+        {
+            if (!QuickSwitchNative.IsWindow(lpPair.Key))
+            {
+                lpDead.Add(lpPair.Key);
+            }
+        }
+
+        foreach (var lpHandle in lpDead)
+        {
+            AppLog.Info($"快速切换栏兜底清理: dialog=0x{lpHandle.ToInt64():X} 已不存在");
+            RemoveQuickBar(lpHandle, _lpQuickBars[lpHandle]);
+        }
+    }
+
+    /// <summary>只有当前对话框对应的那条栏响应键盘；前台切到非对话框窗口时立即停止拦截。</summary>
+    private void UpdateKeyboardBarForForeground(IntPtr foreground)
+    {
+        var lpBar = Volatile.Read(ref _lpKeyboardBar);
+        if (lpBar is null)
+        {
+            return;
+        }
+
+        if (foreground == lpBar.DialogHandle)
+        {
+            return;
+        }
+
+        if (foreground != IntPtr.Zero && _lpQuickBars.TryGetValue(foreground, out var lpNext))
+        {
+            ActivateQuickBar(lpNext);
+            return;
+        }
+
+        Volatile.Write(ref _lpKeyboardBar, null);
+        lpBar.SetKeyboardActive(false);
+    }
+
+    private void ActivateQuickBar(QuickSwitchWindow bar)
+    {
+        var lpPrevious = Volatile.Read(ref _lpKeyboardBar);
+        if (lpPrevious != bar)
+        {
+            lpPrevious?.SetKeyboardActive(false);
+        }
+
+        Volatile.Write(ref _lpKeyboardBar, bar);
+        bar.SetKeyboardActive(true);
+    }
+
+    /// <summary>
+    /// 低层键盘钩子回调（原生消息线程）：仅当栏处于键盘模式且对应对话框仍在前台时，
+    /// 吞掉 1–6 / Enter / Esc / ↑↓，并把动作投回 UI 线程。回调里不做任何耗时工作。
+    /// 这里不排除注入按键：远程桌面、输入法/辅助工具常常以注入方式送键，
+    /// 而该路径已被「显式激活 + 对话框在前台」两重条件限定，误吞风险可忽略。
+    /// </summary>
+    private bool InterceptQuickBarKey(int virtualKey, bool isDown, bool isInjected)
+    {
+        if (!isDown)
+        {
+            return false;
+        }
+
+        var lpBar = Volatile.Read(ref _lpKeyboardBar);
+        var lpWindow = _lpWindow;
+        if (lpBar is null || lpWindow is null)
+        {
+            return false;
+        }
+
+        var lpDialog = lpBar.DialogHandle;
+        if (lpDialog == IntPtr.Zero || NativeMethods.GetForegroundWindow() != lpDialog)
+        {
+            return false;
+        }
+
+        var lpIsDigit = virtualKey is >= 0x31 and <= 0x36 || virtualKey is >= 0x61 and <= 0x66;
+        if (!lpIsDigit && virtualKey is not (0x1B or 0x0D or 0x26 or 0x28))
+        {
+            return false;
+        }
+
+        lpWindow.UiDispatcher.TryEnqueue(() => lpBar.HandleKey(virtualKey));
+        return true;
     }
 
     private void OpenAbout()
@@ -705,8 +917,17 @@ public partial class App : Application
 
         try
         {
-            _lpQuickWindow?.PrepareShutdown();
-            _lpQuickWindow?.Close();
+            _lpDialogWatcher?.Dispose();
+            _lpDialogWatcher = null;
+            foreach (var lpBar in _lpQuickBars.Values)
+            {
+                lpBar.CloseSafely();
+            }
+
+            _lpQuickBars.Clear();
+            Volatile.Write(ref _lpKeyboardBar, null);
+            _lpDetachedBar?.CloseSafely();
+            _lpDetachedBar = null;
             _lpTrayMenu?.PrepareShutdown();
             _lpTrayMenu?.Close();
             _lpSettingsWindow?.PrepareShutdown();

@@ -14,7 +14,9 @@ namespace Pathleap.UI.Platform;
 internal sealed class NativeMessageHost : IDisposable
 {
     private const uint WmQuit = 0x0012;
+    private const uint WmTimer = 0x0113;
     private const int TrayIconId = 1;
+    private const int HookWatchdogTimerId = 3;
 
     private readonly ManualResetEventSlim _lpReady = new(false);
     private readonly ManualResetEventSlim _lpStopped = new(false);
@@ -25,6 +27,8 @@ internal sealed class NativeMessageHost : IDisposable
     private NativeMethods.WindowProcedure? _lpWindowProcedure;
     private uint _lpTaskbarCreatedMessage;
     private NotifyIconHandle? _lpTray;
+    private KeyboardHook? _lpKeyboardHook;
+    private Func<int, bool, bool, bool>? _lpKeyInterceptor;
 
     public event Action<long>? HotkeyPressed;
 
@@ -49,6 +53,21 @@ internal sealed class NativeMessageHost : IDisposable
     public int QuickHotkeyErrorCode { get; private set; }
 
     public bool TrayAvailable => _lpTray?.Added ?? false;
+
+    /// <summary>键盘钩子是否安装成功；失败时双击类唤醒方式不可用。</summary>
+    public bool KeyboardHookRegistered { get; private set; }
+
+    public int KeyboardHookErrorCode { get; private set; }
+
+    /// <summary>
+    /// 全局按键拦截器（在原生消息线程回调，必须极短）：参数为虚拟键、是否按下、是否注入；
+    /// 返回 true 表示吞掉该键。用于快速切换栏的 1–6/Enter/Esc 与双击唤醒判定。
+    /// </summary>
+    public Func<int, bool, bool, bool>? KeyInterceptor
+    {
+        get => _lpKeyInterceptor;
+        set => _lpKeyInterceptor = value;
+    }
 
     public bool Start(HotkeySpec hotkey, HotkeySpec quickHotkey, string trayTooltip)
     {
@@ -138,6 +157,20 @@ internal sealed class NativeMessageHost : IDisposable
                 AppLog.Info($"快速切换热键注册成功: {QuickHotkey.Display}");
             }
 
+            // 全局键盘钩子：快速切换栏按键与双击唤醒都依赖它；定期自检重装防止被系统静默摘掉。
+            _lpKeyboardHook = new KeyboardHook(InvokeKeyInterceptor);
+            KeyboardHookRegistered = _lpKeyboardHook.Install();
+            KeyboardHookErrorCode = _lpKeyboardHook.LastError;
+            if (!KeyboardHookRegistered)
+            {
+                AppLog.Error($"低层键盘钩子安装失败（Win32={KeyboardHookErrorCode}）。双击类唤醒方式不可用。");
+            }
+            else
+            {
+                NativeMethods.SetTimer(_lpHwnd, (IntPtr)HookWatchdogTimerId, 15_000, IntPtr.Zero);
+                AppLog.Info("低层键盘钩子已安装（每 15 秒自检重装）。");
+            }
+
             _lpTray = new NotifyIconHandle(_lpHwnd, trayTooltip);
             _lpTray.Add(showWarningIfFailed: false);
             if (_lpTray.Added)
@@ -160,8 +193,11 @@ internal sealed class NativeMessageHost : IDisposable
         finally
         {
             _lpTray?.Dispose();
+            _lpKeyboardHook?.Remove();
+            _lpKeyboardHook = null;
             if (_lpHwnd != IntPtr.Zero)
             {
+                NativeMethods.KillTimer(_lpHwnd, (IntPtr)HookWatchdogTimerId);
                 NativeMethods.UnregisterHotKey(_lpHwnd, NativeMethods.HotkeyId);
                 NativeMethods.UnregisterHotKey(_lpHwnd, NativeMethods.QuickHotkeyId);
                 NativeMethods.DestroyWindow(_lpHwnd);
@@ -211,6 +247,22 @@ internal sealed class NativeMessageHost : IDisposable
 
                 break;
 
+            case WmTimer:
+                if ((int)(long)wParam == HookWatchdogTimerId)
+                {
+                    // 系统会在回调超时时静默移除低层钩子，这里周期性重装以保证唤醒方式始终有效。
+                    if (_lpKeyboardHook?.Rearm() == false)
+                    {
+                        KeyboardHookRegistered = false;
+                        KeyboardHookErrorCode = _lpKeyboardHook?.LastError ?? 0;
+                        AppLog.Error($"低层键盘钩子已被系统移除且重装失败（Win32={KeyboardHookErrorCode}）。");
+                    }
+
+                    return IntPtr.Zero;
+                }
+
+                break;
+
             case NativeMethods.WmTrayCallback:
                 HandleTrayCallback(NativeMethods.GetLowWord(lParam));
                 return IntPtr.Zero;
@@ -228,6 +280,12 @@ internal sealed class NativeMessageHost : IDisposable
         }
 
         return NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+
+    private bool InvokeKeyInterceptor(int virtualKey, bool isDown, bool isInjected)
+    {
+        var lpInterceptor = _lpKeyInterceptor;
+        return lpInterceptor is not null && lpInterceptor(virtualKey, isDown, isInjected);
     }
 
     private void HandleTrayCallback(int mouseMessage)
