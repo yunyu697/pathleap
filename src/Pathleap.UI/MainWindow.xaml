@@ -63,7 +63,8 @@
                             CornerRadius="6"
                             Padding="8,4"
                             VerticalAlignment="Center">
-                        <TextBlock Text="M1 空壳"
+                        <TextBlock x:Name="BadgeText"
+                                   Text="v0.0.0"
                                    FontSize="10"
                                    Foreground="#98A2B3" />
                     </Border>
@@ -71,41 +72,101 @@
 
                 <Border Grid.Row="1" Height="1" Background="#14FFFFFF" Margin="18,0" />
 
-                <!-- 分组标题 -->
+                <!-- 结果区标题 -->
                 <Grid Grid.Row="2" Padding="20,12,20,4">
-                    <TextBlock Text="最近访问"
+                    <TextBlock x:Name="ResultsHeaderText"
+                               Text="搜索结果"
                                FontSize="11"
                                FontWeight="SemiBold"
                                Foreground="#9AA4B5" />
-                    <TextBlock Text="M1 占位"
+                    <TextBlock x:Name="ResultsCountText"
+                               Text=""
                                FontSize="10"
                                Foreground="#616B7C"
                                HorizontalAlignment="Right" />
                 </Grid>
 
-                <!-- 空状态 -->
-                <Grid Grid.Row="3" Padding="24,0,24,16">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <!-- 结果列表 + 空状态 -->
+                <Grid Grid.Row="3" Padding="10,0,10,10">
+                    <ListView x:Name="ResultsList"
+                              Background="Transparent"
+                              BorderThickness="0"
+                              SelectionMode="Single"
+                              IsItemClickEnabled="False"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              ItemContainerTransitions="{x:Null}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnSpacing="12" Padding="6,7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Width="30"
+                                            Height="30"
+                                            CornerRadius="8"
+                                            Background="#14FFFFFF"
+                                            VerticalAlignment="Center">
+                                        <FontIcon Glyph="{Binding Glyph}"
+                                                  FontFamily="Segoe Fluent Icons"
+                                                  FontSize="14"
+                                                  Foreground="#8FA6FF"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="13.5"
+                                                   Foreground="#EDF1F7"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding FolderPath}"
+                                                   FontSize="11"
+                                                   Foreground="#7F8899"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding SizeText}"
+                                               FontSize="11"
+                                               Foreground="#7F8899"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <StackPanel x:Name="EmptyPanel"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="10">
                         <Border Width="44"
                                 Height="44"
                                 CornerRadius="12"
                                 Background="#14FFFFFF"
                                 HorizontalAlignment="Center">
-                            <FontIcon Glyph="&#xE721;"
+                            <FontIcon x:Name="EmptyIcon"
+                                      Glyph="&#xE721;"
                                       FontFamily="Segoe Fluent Icons"
                                       FontSize="19"
                                       Foreground="#727EE8"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="M1 骨架：搜索与索引尚未启用"
+                        <TextBlock x:Name="EmptyTitleText"
+                                   Text="输入关键词开始搜索"
                                    FontSize="14"
                                    FontWeight="SemiBold"
                                    Foreground="#C9D1DE"
                                    HorizontalAlignment="Center" />
-                        <TextBlock Text="全局热键唤出 · 托盘常驻 · 真实索引将在 M2 接入"
+                        <TextBlock x:Name="EmptyHintText"
+                                   Text="索引由后台服务提供 · 全局热键唤出 · ↑↓ 选择 · ↵ 打开"
                                    FontSize="12"
                                    Foreground="#808A9B"
+                                   TextAlignment="Center"
                                    HorizontalAlignment="Center" />
                     </StackPanel>
                 </Grid>
@@ -135,7 +196,7 @@
                                      Fill="#C77A18"
                                      VerticalAlignment="Center" />
                             <TextBlock x:Name="ServiceStatusText"
-                                       Text="服务未连接 · 索引未启用"
+                                       Text="正在连接索引服务…"
                                        FontSize="11"
                                        Foreground="#98A2B3"
                                        VerticalAlignment="Center" />

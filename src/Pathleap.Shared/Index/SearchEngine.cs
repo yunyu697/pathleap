@@ -99,7 +99,7 @@ public sealed class SearchEngine
 
         if (lpTokens.Count == 1)
         {
-            CollectSingleToken(lpTokens[0], lpCount, lpBuckets, lpOutcome);
+            CollectSingleToken(lpTokens[0], lpCount, lpBuckets, lpOutcome, Math.Clamp(limit, 1, 500));
         }
         else
         {
@@ -144,7 +144,7 @@ public sealed class SearchEngine
         return Math.Round((Stopwatch.GetTimestamp() - startedTick) * 1000.0 / Stopwatch.Frequency, 3);
     }
 
-    private void CollectSingleToken(byte[] token, int count, HitBuckets buckets, SearchOutcome outcome)
+    private void CollectSingleToken(byte[] token, int count, HitBuckets buckets, SearchOutcome outcome, int limit)
     {
         var lpLow = LowerBound(token);
         var lpHigh = UpperBoundOfPrefix(token, lpLow);
@@ -164,6 +164,15 @@ public sealed class SearchEngine
         }
 
         outcome.PrefixMatches = lpPrefixAdded;
+
+        // 结果按 tier 先后输出：精确/前缀命中已经够填满本次结果集时，
+        // 子串命中（tier 更低）不可能进入前 limit 条，整段子串扫描可以省掉。
+        // 这一条让高频前缀查询（如 report）从「全库子串扫描」降到「二分 + 前 N 条前缀」。
+        if (buckets.Count >= limit)
+        {
+            outcome.SubstringMatches = 0;
+            return;
+        }
 
         var lpSubstring = FindSubstringMatches(token, count, lpLow, lpHigh);
         foreach (var lpIndex in lpSubstring)
@@ -411,6 +420,7 @@ public sealed class SearchEngine
         var lpByteEnd = Math.Min((int)lpLastRecord.NameOffset + lpLastSuffixLen, lpArena.Length);
         var lpTokenLength = token.Length;
         var lpSeen = new HashSet<int>();
+        var lpTailValues = CreateTokenTailValues(token);
 
         // 后缀区命中：完整落在某个条目的后缀内才算（跨界的那部分由衔接检查兜底）。
         if (lpByteStart < lpByteEnd)
@@ -477,34 +487,47 @@ public sealed class SearchEngine
         }
 
         // 跨前缀/后缀衔接处的命中：逐个条目补查（每条只比几个字节，可接受）。
-        for (var lpIndex = startEntry; lpIndex < endEntry; lpIndex++)
+        // 先用“后缀首字节必须是 token 第 1..k-1 位之一”快速否掉绝大多数条目，避免无谓的块首名随机访问；
+        // 再按前缀块成组遍历，块首名与块首记录只读一次（块内 5 条共享），把随机访问降到 1/5。
+        if (lpTailValues is not null)
         {
-            if (lpSeen.Count >= cap)
+            var lpIndex = startEntry;
+            while (lpIndex < endEntry && lpSeen.Count < cap)
             {
-                break;
-            }
+                var lpBlockStart = _lpSnapshot.BlockStartIndex(lpIndex);
+                var lpBlockEnd = Math.Min(lpBlockStart + IndexFormat.PrefixBlockSize, endEntry);
+                var lpBlockName = _lpSnapshot.GetBlockStartNameSpan(lpBlockStart);
 
-            if (lpIndex >= skipLow && lpIndex < skipHigh)
-            {
-                continue;
-            }
+                for (; lpIndex < lpBlockEnd; lpIndex++)
+                {
+                    if (lpSeen.Count >= cap)
+                    {
+                        break;
+                    }
 
-            var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(lpIndex);
-            if (lpPrefixLen == 0)
-            {
-                continue;
-            }
+                    if (lpIndex >= skipLow && lpIndex < skipHigh)
+                    {
+                        continue;
+                    }
 
-            var lpRecord = _lpSnapshot.GetRecord(lpIndex);
-            var lpSuffix = _lpSnapshot.GetSuffixSpan(lpIndex, lpRecord);
-            if (lpSuffix.Length == 0)
-            {
-                continue;
-            }
+                    var lpPrefixLen = (int)_lpSnapshot.GetPrefixLength(lpIndex);
+                    if (lpPrefixLen == 0)
+                    {
+                        continue;
+                    }
 
-            if (HasJunctionMatch(_lpSnapshot.GetBlockStartNameSpan(lpIndex), lpPrefixLen, lpSuffix, token))
-            {
-                AddSubstringHit(lpIndex, skipLow, skipHigh, lpSeen, target);
+                    var lpRecord = _lpSnapshot.GetRecord(lpIndex);
+                    var lpSuffix = _lpSnapshot.GetSuffixSpan(lpIndex, lpRecord);
+                    if (lpSuffix.Length == 0 || !lpTailValues.Contains(lpSuffix[0]))
+                    {
+                        continue;
+                    }
+
+                    if (HasJunctionMatch(lpBlockName, lpPrefixLen, lpSuffix, token))
+                    {
+                        AddSubstringHit(lpIndex, skipLow, skipHigh, lpSeen, target);
+                    }
+                }
             }
         }
 
@@ -540,6 +563,31 @@ public sealed class SearchEngine
         }
 
         return SearchValues.Create(stackalloc byte[] { foldedFirst, lpUpper });
+    }
+
+    /// <summary>
+    /// 衔接命中时后缀首字节的候选集：token 的第 1..k-1 位（含大写变体）。
+    /// 用于在按条遍历前快速否掉不可能跨界的条目；token 只有 1 个字节时不存在衔接命中，返回 null。
+    /// </summary>
+    private static SearchValues<byte>? CreateTokenTailValues(byte[] foldedToken)
+    {
+        if (foldedToken.Length < 2)
+        {
+            return null;
+        }
+
+        var lpValues = new List<byte>(foldedToken.Length * 2);
+        for (var lpI = 1; lpI < foldedToken.Length; lpI++)
+        {
+            var lpByte = foldedToken[lpI];
+            lpValues.Add(lpByte);
+            if (lpByte is >= (byte)'a' and <= (byte)'z')
+            {
+                lpValues.Add((byte)(lpByte - 32));
+            }
+        }
+
+        return SearchValues.Create(lpValues.ToArray());
     }
 
     /// <summary>按 ASCII 折叠比较定长片段。</summary>

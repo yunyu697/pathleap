@@ -86,7 +86,9 @@ internal sealed class ServiceLauncher : IDisposable
             }
 
             Connected = true;
-            StatusText = $"服务已连接 · PID {lpReply.Status.Pid} · 索引未启用";
+            StatusText = lpReply.Index is { Loaded: true }
+                ? $"服务已连接 · {lpReply.Index.EntryCount:N0} 条 · {lpReply.Index.Source}"
+                : "服务已连接 · 索引未构建";
             AppLog.Info($"服务连接成功: mode={lpReply.Status.Mode}, pid={lpReply.Status.Pid}, uptime={lpReply.Status.UptimeMs}ms");
             return true;
         }

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
@@ -8,6 +9,7 @@ using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
+using Pathleap.Shared.Ipc;
 using Pathleap.UI.Perf;
 using Pathleap.UI.Platform;
 using Windows.Graphics;
@@ -17,7 +19,8 @@ using Windows.UI;
 namespace Pathleap.UI;
 
 /// <summary>
-/// M1 空搜索窗：无标题栏、置顶、失焦自动隐藏。
+/// 搜索窗：无标题栏、置顶、失焦自动隐藏。
+/// 输入经防抖后走命名管道向服务查询，结果列表支持 ↑↓/PgUp/PgDn 选择、↵ 打开、Esc 隐藏。
 /// 预创建且默认不 Activate，保证首帧不在启动阶段渲染；每次唤出时记录 QPC 打点供基准测试使用。
 /// </summary>
 public sealed partial class MainWindow : Window
@@ -29,9 +32,23 @@ public sealed partial class MainWindow : Window
     private const int ForegroundRetryDelayMs = 120;
     private const int ForegroundRetryAttempts = 2;
 
+    /// <summary>输入防抖：连续敲键时只在停手后发一次查询。</summary>
+    private const int SearchDebounceMs = 120;
+
+    /// <summary>结果条数上限（与服务端默认 30 条对齐但略小，一屏内可扫完）。</summary>
+    private const int SearchLimit = 24;
+
+    /// <summary>PgUp/PgDn 每次跨过的行数。</summary>
+    private const int PageStep = 6;
+
     private readonly AppConfig _lpConfig;
     private readonly IntPtr _lpHwnd;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _lpDispatcher;
+    private readonly ObservableCollection<ResultRow> _lpRows = new();
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpSearchTimer;
+    private int _lpQueryGeneration;
+    private bool _lpSuppressAutoSearch;
+    private double _lpLastQueryMs = -1;
     private WakeSample? _lpPendingSample;
     private WakeSample? _lpActiveSample;
     private bool _lpVisible;
@@ -49,7 +66,9 @@ public sealed partial class MainWindow : Window
         _lpDispatcher = DispatcherQueue;
         Title = $"{Branding.DisplayName} · {Branding.ChineseName}";
         BrandMarkText.Text = Branding.Mark;
-        VersionText.Text = $"M1 · {Branding.Version}";
+        VersionText.Text = Branding.Version;
+        BadgeText.Text = Branding.Version;
+        ResultsList.ItemsSource = _lpRows;
 
         ConfigureWindow();
 
@@ -341,17 +360,37 @@ public sealed partial class MainWindow : Window
             _lpActiveSample.RecordWindowState(_lpHwnd);
         }
 
-        if (e.Key == VirtualKey.Escape)
+        switch (e.Key)
         {
-            e.Handled = true;
-            HideCore();
-            return;
-        }
+            case VirtualKey.Escape:
+                e.Handled = true;
+                HideCore();
+                return;
 
-        if (e.Key == VirtualKey.Enter)
-        {
-            e.Handled = true;
-            AppLog.Info("M1 空壳：无搜索结果，Enter 不执行任何动作。");
+            case VirtualKey.Up:
+                e.Handled = true;
+                MoveSelection(-1);
+                return;
+
+            case VirtualKey.Down:
+                e.Handled = true;
+                MoveSelection(1);
+                return;
+
+            case VirtualKey.PageUp:
+                e.Handled = true;
+                MoveSelection(-PageStep);
+                return;
+
+            case VirtualKey.PageDown:
+                e.Handled = true;
+                MoveSelection(PageStep);
+                return;
+
+            case VirtualKey.Enter:
+                e.Handled = true;
+                OpenSelected();
+                return;
         }
     }
 
@@ -362,6 +401,210 @@ public sealed partial class MainWindow : Window
             _lpActiveSample.InputText = SearchBox.Text;
             _lpActiveSample.MarkText(Stopwatch.GetTimestamp());
         }
+
+        ScheduleSearch();
+    }
+
+    private void ScheduleSearch()
+    {
+        if (_lpSuppressAutoSearch)
+        {
+            return;
+        }
+
+        _lpSearchTimer ??= CreateSearchTimer();
+        _lpSearchTimer.Stop();
+        AppLog.Debug($"输入变化: '{SearchBox.Text}'");
+
+        if (string.IsNullOrWhiteSpace(SearchBox.Text))
+        {
+            _lpQueryGeneration++;
+            ApplyResults(null);
+            ShowEmpty("\uE721", "输入关键词开始搜索", "索引由后台服务提供 · ↑↓ 选择 · ↵ 打开 · Esc 隐藏");
+            return;
+        }
+
+        _lpSearchTimer.Start();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateSearchTimer()
+    {
+        var lpTimer = _lpDispatcher.CreateTimer();
+        lpTimer.Interval = TimeSpan.FromMilliseconds(SearchDebounceMs);
+        lpTimer.IsRepeating = false;
+        lpTimer.Tick += (_, _) =>
+        {
+            lpTimer.Stop();
+            _ = RunSearchAsync(SearchBox.Text);
+        };
+        return lpTimer;
+    }
+
+    /// <summary>把查询发到服务管道，并在结果回来时更新列表（过期的响应直接丢弃）。</summary>
+    private async Task<IpcReply> RunSearchAsync(string lpQuery)
+    {
+        var lpGeneration = ++_lpQueryGeneration;
+        try
+        {
+            var lpRequest = new IpcRequest { Command = "SEARCH", Query = lpQuery, Limit = SearchLimit };
+            var lpReply = await PipeClient.SendAsync(Branding.ServicePipeName, lpRequest, TimeSpan.FromSeconds(5));
+
+            if (lpGeneration != _lpQueryGeneration)
+            {
+                AppLog.Debug($"丢弃过期搜索结果: gen={lpGeneration} current={_lpQueryGeneration}");
+                return lpReply;
+            }
+
+            if (!lpReply.Ok)
+            {
+                ApplyResults(null);
+                ShowEmpty("\uE783", "索引尚未就绪", lpReply.Message);
+                return lpReply;
+            }
+
+            _lpLastQueryMs = lpReply.QueryMs;
+            ApplyResults(lpReply.Hits);
+            AppLog.Debug($"结果已应用: q={lpQuery} hits={_lpRows.Count} queryMs={lpReply.QueryMs:0.0}");
+            if (_lpRows.Count == 0)
+            {
+                ShowEmpty("\uE721", "没有匹配的结果", "试试更短的关键词，或文件名中的一段");
+            }
+
+            return lpReply;
+        }
+        catch (Exception ex)
+        {
+            if (lpGeneration != _lpQueryGeneration)
+            {
+                return IpcReply.Failure(ex.Message);
+            }
+
+            AppLog.Warn($"搜索失败（{lpQuery}）: {ex.Message}");
+            ApplyResults(null);
+            ShowEmpty("\uE783", "索引服务未连接", "请从托盘菜单检查服务状态");
+            return IpcReply.Failure(ex.Message);
+        }
+    }
+
+    private void ApplyResults(IReadOnlyList<SearchHitDto>? lpPayloadHits)
+    {
+        _lpRows.Clear();
+        if (lpPayloadHits is not null)
+        {
+            foreach (var lpHit in lpPayloadHits)
+            {
+                _lpRows.Add(ResultRow.FromDto(lpHit));
+            }
+        }
+
+        if (_lpRows.Count > 0)
+        {
+            ResultsList.SelectedIndex = 0;
+            EmptyPanel.Visibility = Visibility.Collapsed;
+            ResultsList.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            EmptyPanel.Visibility = Visibility.Visible;
+            ResultsList.Visibility = Visibility.Collapsed;
+        }
+
+        ResultsCountText.Text = _lpRows.Count == 0
+            ? string.Empty
+            : (_lpLastQueryMs >= 0
+                ? $"{_lpRows.Count} 条 · {_lpLastQueryMs:0.0} ms"
+                : $"{_lpRows.Count} 条");
+    }
+
+    private void ShowEmpty(string lpGlyph, string lpTitle, string lpHint)
+    {
+        EmptyIcon.Glyph = lpGlyph;
+        EmptyTitleText.Text = lpTitle;
+        EmptyHintText.Text = lpHint;
+        EmptyPanel.Visibility = Visibility.Visible;
+        ResultsList.Visibility = Visibility.Collapsed;
+    }
+
+    private void MoveSelection(int lpDelta)
+    {
+        if (_lpRows.Count == 0)
+        {
+            return;
+        }
+
+        var lpNext = ResultsList.SelectedIndex + lpDelta;
+        lpNext = Math.Clamp(lpNext, 0, _lpRows.Count - 1);
+        ResultsList.SelectedIndex = lpNext;
+        ResultsList.ScrollIntoView(_lpRows[lpNext]);
+    }
+
+    /// <summary>↵：目录用资源管理器打开，文件交给系统默认程序；打开后立即隐藏窗口。</summary>
+    private void OpenSelected()
+    {
+        var lpIndex = ResultsList.SelectedIndex;
+        if (lpIndex < 0 || lpIndex >= _lpRows.Count)
+        {
+            AppLog.Info("没有可打开的搜索结果。");
+            return;
+        }
+
+        var lpRow = _lpRows[lpIndex];
+        try
+        {
+            var lpStartInfo = lpRow.IsDirectory
+                ? new ProcessStartInfo("explorer.exe", $"\"{lpRow.FullPath}\"") { UseShellExecute = true }
+                : new ProcessStartInfo(lpRow.FullPath) { UseShellExecute = true };
+            Process.Start(lpStartInfo);
+            AppLog.Info($"已打开 {(lpRow.IsDirectory ? "目录" : "文件")}: {lpRow.FullPath}");
+            HideCore();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开失败 {lpRow.FullPath}: {ex.Message}");
+            ShowEmpty("\uE783", "无法打开该条目", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 自动化/后台验证入口：等价于用户输入这段文本并等结果返回（不注入真实键鼠、不抢前台）。
+    /// </summary>
+    internal async Task<IpcReply> QueryForTestAsync(string lpQuery)
+    {
+        // TextBox.TextChanged 是异步派发的：置文本后它可能在 await 期间才触发并启动防抖定时器，
+        // 导致同一查询被跑两次、先到的响应被当成过期结果丢弃。自动化路径全程抑制防抖。
+        _lpSuppressAutoSearch = true;
+        try
+        {
+            _lpSearchTimer?.Stop();
+            SearchBox.Text = lpQuery;
+            var lpReply = await RunSearchAsync(lpQuery);
+            return BuildSelectionReply(lpReply.Message);
+        }
+        finally
+        {
+            _lpSearchTimer?.Stop();
+            _lpSuppressAutoSearch = false;
+        }
+    }
+
+    /// <summary>自动化/后台验证入口：等价于按 ↑/↓ 移动选择。</summary>
+    internal IpcReply SelectForTest(int lpDelta)
+    {
+        MoveSelection(lpDelta);
+        return BuildSelectionReply("select");
+    }
+
+    private IpcReply BuildSelectionReply(string lpMessage)
+    {
+        var lpIndex = ResultsList.SelectedIndex;
+        return new IpcReply
+        {
+            Ok = true,
+            Message = $"{lpMessage} results={_lpRows.Count} selected={lpIndex}",
+            QueryMs = _lpLastQueryMs,
+            CandidateCount = _lpRows.Count,
+            Hits = _lpRows.Select(static lpRow => lpRow.ToDto()).ToList()
+        };
     }
 
     private void OnRendering(object? sender, object e)
@@ -404,5 +647,78 @@ public sealed partial class MainWindow : Window
     public void PrepareShutdown()
     {
         _lpAllowClose = true;
+    }
+}
+
+/// <summary>结果列表一行的展示模型（名字、所在目录、大小文本、图标字形）。</summary>
+public sealed class ResultRow
+{
+    private const string FolderGlyph = "\uE8B7";
+    private const string FileGlyph = "\uE7C3";
+
+    public string Name { get; init; } = string.Empty;
+
+    public string FullPath { get; init; } = string.Empty;
+
+    public string FolderPath { get; init; } = string.Empty;
+
+    public string SizeText { get; init; } = string.Empty;
+
+    public string Glyph { get; init; } = FileGlyph;
+
+    public bool IsDirectory { get; init; }
+
+    public long Size { get; init; }
+
+    public string? ModifiedAt { get; init; }
+
+    public int Tier { get; init; }
+
+    public double Score { get; init; }
+
+    public static ResultRow FromDto(SearchHitDto lpDto)
+    {
+        var lpFolder = System.IO.Path.GetDirectoryName(lpDto.Path) ?? string.Empty;
+        return new ResultRow
+        {
+            Name = lpDto.Name,
+            FullPath = lpDto.Path,
+            FolderPath = lpFolder,
+            SizeText = lpDto.IsDirectory ? string.Empty : FormatSize(lpDto.Size),
+            Glyph = lpDto.IsDirectory ? FolderGlyph : FileGlyph,
+            IsDirectory = lpDto.IsDirectory,
+            Size = lpDto.Size,
+            ModifiedAt = lpDto.ModifiedAt,
+            Tier = lpDto.Tier,
+            Score = lpDto.Score
+        };
+    }
+
+    public SearchHitDto ToDto() => new()
+    {
+        Name = Name,
+        Path = FullPath,
+        IsDirectory = IsDirectory,
+        Size = Size,
+        ModifiedAt = ModifiedAt,
+        Tier = Tier,
+        Score = Score
+    };
+
+    private static string FormatSize(long lpBytes)
+    {
+        if (lpBytes < 1024)
+        {
+            return $"{lpBytes} B";
+        }
+
+        var lpKb = lpBytes / 1024.0;
+        if (lpKb < 1024)
+        {
+            return $"{lpKb:0.#} KB";
+        }
+
+        var lpMb = lpKb / 1024.0;
+        return lpMb < 1024 ? $"{lpMb:0.#} MB" : $"{lpMb / 1024.0:0.#} GB";
     }
 }

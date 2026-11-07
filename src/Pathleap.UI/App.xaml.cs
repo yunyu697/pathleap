@@ -77,7 +77,7 @@ public partial class App : Application
                 _lpHotkey = lpParsedHotkey;
             }
 
-            var lpTooltip = $"{Branding.DisplayName}（{Branding.ChineseName}） · {_lpHotkey.Display} · M1";
+            var lpTooltip = $"{Branding.DisplayName}（{Branding.ChineseName}） · {_lpHotkey.Display}";
             var lpStarted = await Task.Run(() => _lpNativeHost.Start(_lpHotkey, lpTooltip));
             if (!lpStarted)
             {
@@ -209,6 +209,30 @@ public partial class App : Application
                 }
 
                 return DispatchToUiAsync(() => RunBenchmarkAsync(request.Samples));
+
+            // 后台验证入口：等价于在搜索框输入文本并等结果回来，不注入真实键鼠。
+            case "QUERY":
+            {
+                var lpWindow = _lpWindow;
+                if (lpWindow is null)
+                {
+                    return Task.FromResult<IpcReply>(IpcReply.Failure("搜索窗尚未就绪。"));
+                }
+
+                return DispatchToUiAsync(() => lpWindow.QueryForTestAsync(request.Query));
+            }
+
+            // 后台验证入口：等价于按 ↑/↓ 移动结果选择。
+            case "NAV":
+            {
+                var lpWindow = _lpWindow;
+                if (lpWindow is null)
+                {
+                    return Task.FromResult<IpcReply>(IpcReply.Failure("搜索窗尚未就绪。"));
+                }
+
+                return DispatchToUiAsync(() => Task.FromResult(lpWindow.SelectForTest(request.Samples)));
+            }
 
             case "QUIT":
                 _ = Task.Run(async () =>
