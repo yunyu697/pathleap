@@ -55,9 +55,29 @@ New-Item -ItemType Directory -Path $LpOutputRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $LpStageDir -Force | Out-Null
 
 # UI 目录已经包含除服务之外的全部依赖（Build-Lp.ps1 会把服务复制进来）。
-$LpFiles = Get-ChildItem -LiteralPath $LpUiDir -File | Where-Object { $_.Extension -notin @('.pdb', '.xml') }
-foreach ($LpFile in $LpFiles) {
-    Copy-Item -LiteralPath $LpFile.FullName -Destination (Join-Path $LpStageDir $LpFile.Name) -Force
+# 必须保留 runtimes\win-x64\native 子目录：Windows App Runtime 的原生引导 DLL
+# （Microsoft.WindowsAppRuntime.Bootstrap.dll）在那里，只复制顶层文件会导致
+# 打包后的 UI 启动时报 DllNotFoundException。
+$LpUiFiles = Get-ChildItem -LiteralPath $LpUiDir -File -Recurse | Where-Object {
+    if ($_.Extension -in @('.pdb', '.xml')) {
+        return $false
+    }
+
+    if ($_.FullName -match '\\runtimes\\') {
+        return $_.FullName -match '\\runtimes\\win-x64\\'
+    }
+
+    return $true
+}
+foreach ($LpFile in $LpUiFiles) {
+    $LpRelative = [System.IO.Path]::GetRelativePath($LpUiDir, $LpFile.FullName)
+    $LpDestination = Join-Path $LpStageDir $LpRelative
+    $LpParent = Split-Path -Parent $LpDestination
+    if (-not (Test-Path -LiteralPath $LpParent)) {
+        New-Item -ItemType Directory -Path $LpParent -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath $LpFile.FullName -Destination $LpDestination -Force
 }
 
 $LpServiceFiles = Get-ChildItem -LiteralPath $LpServiceDir -File |
