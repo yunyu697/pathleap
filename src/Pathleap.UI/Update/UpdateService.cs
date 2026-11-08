@@ -7,7 +7,7 @@ using Pathleap.Shared.Update;
 namespace Pathleap.UI.Update;
 
 /// <summary>
-/// 更新检查与下载：只读公开发布仓库的 <c>latest.json</c>，不携带任何令牌。
+/// 更新检查与下载：只读公开主仓库最新 Release 的 <c>latest.json</c>，不携带任何令牌。
 /// 清单必须 Ed25519 验签通过；安装包必须 SHA256 逐字节校验一致，否则拒绝安装。
 /// 网络或校验失败时把原因原样交给界面，不做静默降级。
 /// </summary>
@@ -39,7 +39,7 @@ public static class UpdateService
             {
                 var lpStatus = (int)lpResponse.StatusCode;
                 var lpMessage = lpStatus == 404
-                    ? $"公开发布仓库暂无最新清单（HTTP 404）：{ReleaseFeed.ManifestUrl}"
+                    ? $"主仓库暂无最新清单（HTTP 404）：{ReleaseFeed.ManifestUrl}"
                     : $"发布仓库返回 HTTP {lpStatus}";
                 AppLog.Warn($"更新检查失败: {lpMessage}");
                 return UpdateCheckResult.Failure(lpMessage);

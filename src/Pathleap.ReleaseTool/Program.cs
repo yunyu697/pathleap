@@ -53,7 +53,7 @@ internal static class Program
                      --installer dist/xxx-setup.exe --portable dist/xxx.zip
                      --out dist/latest.json (--seed-file PATH | --seed-base64 BASE64)
                      [--repo owner/name] [--released-at ISO8601] [--channel stable] [--platform win-x64]
-                     [--installer-url URL] [--portable-url URL]
+                     [--installer-url URL] [--portable-url URL] [--sig-out dist/latest.json.sig]
               verify --manifest dist/latest.json [--public-key BASE64]
             """);
     }
@@ -146,6 +146,21 @@ internal static class Program
 
         File.WriteAllText(lpOut, lpJson + Environment.NewLine, new UTF8Encoding(false));
         Console.WriteLine($"清单已生成并签名: {lpOut}");
+
+        var lpSigOut = options.GetValueOrDefault("sig-out");
+        if (!string.IsNullOrWhiteSpace(lpSigOut))
+        {
+            var lpSigPath = Path.GetFullPath(lpSigOut);
+            var lpSigDir = Path.GetDirectoryName(lpSigPath);
+            if (!string.IsNullOrEmpty(lpSigDir))
+            {
+                Directory.CreateDirectory(lpSigDir);
+            }
+
+            File.WriteAllText(lpSigPath, lpManifest.Signature + Environment.NewLine, new UTF8Encoding(false));
+            Console.WriteLine($"分离签名已写入: {lpSigPath}");
+        }
+
         Console.WriteLine($"  version={lpVersion} tag={lpTag} channel={lpChannel}");
         foreach (var lpEntry in lpManifest.Assets)
         {
@@ -348,14 +363,14 @@ internal static class Program
                     Name = "Pathleap-1.0.5-win-x64-setup.exe",
                     Size = 8_831_614,
                     Sha256 = new string('a', 64),
-                    Url = "https://github.com/yunyu697/pathleap-releases/releases/download/v1.0.5/Pathleap-1.0.5-win-x64-setup.exe"
+                    Url = "https://github.com/yunyu697/pathleap/releases/download/v1.0.5/Pathleap-1.0.5-win-x64-setup.exe"
                 },
                 [ReleaseFeed.AssetPortable] = new()
                 {
                     Name = "Pathleap-1.0.5-win-x64.zip",
                     Size = 11_461_968,
                     Sha256 = new string('b', 64),
-                    Url = "https://github.com/yunyu697/pathleap-releases/releases/download/v1.0.5/Pathleap-1.0.5-win-x64.zip"
+                    Url = "https://github.com/yunyu697/pathleap/releases/download/v1.0.5/Pathleap-1.0.5-win-x64.zip"
                 }
             }
         };

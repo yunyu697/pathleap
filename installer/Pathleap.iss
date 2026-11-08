@@ -43,9 +43,9 @@ AppName=Pathleap
 AppVersion={#AppVersion}
 AppVerName=Pathleap {#AppVersion}
 AppPublisher=Pathleap
-AppPublisherURL=https://github.com/yunyu697/pathleap-releases
-AppSupportURL=https://github.com/yunyu697/pathleap-releases
-AppUpdatesURL=https://github.com/yunyu697/pathleap-releases/releases
+AppPublisherURL=https://github.com/yunyu697/pathleap
+AppSupportURL=https://github.com/yunyu697/pathleap
+AppUpdatesURL=https://github.com/yunyu697/pathleap/releases
 ; {autopf} 随安装模式解析：所有用户 -> {pf}\Pathleap；仅当前用户 -> {localappdata}\Programs\Pathleap。
 DefaultDirName={autopf}\Pathleap
 DefaultGroupName=Pathleap

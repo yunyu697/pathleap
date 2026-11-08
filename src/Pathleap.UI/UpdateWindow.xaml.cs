@@ -17,7 +17,7 @@ namespace Pathleap.UI;
 /// 检查更新窗（设计稿屏 4，440 × 300）：常驻「打开主页 / 检查更新」；发现版本时增加
 /// 「检查更新 / 仅下载 / 更新」与版本号、更新说明、下载源状态；下载中只多一条进度；
 /// 仅下载完成后换成「打开下载目录 / 安装」。
-/// 检查只读公开发布仓库的 latest.json 并 Ed25519 验签；下载后校验 SHA256 才会允许安装。
+/// 检查只读公开主仓库最新 Release 的 latest.json 并 Ed25519 验签；下载后校验 SHA256 才会允许安装。
 /// 只有资产是 github.com 直链时下载源才显示「官方直链」，否则明确说明镜像不可用。
 /// </summary>
 public sealed partial class UpdateWindow : Window
@@ -293,7 +293,7 @@ public sealed partial class UpdateWindow : Window
         _lpPreview = false;
         PreviewBadge.Visibility = Visibility.Collapsed;
         CheckButton.IsEnabled = false;
-        IdleLastText.Text = "正在读取公开发布仓库清单并验签…";
+        IdleLastText.Text = "正在读取主仓库最新 Release 的清单并验签…";
         IdleLastText.Foreground = Theme.ThemeService.Instance.Text3Brush;
 
         var lpResult = await UpdateService.CheckAsync();
@@ -413,7 +413,7 @@ public sealed partial class UpdateWindow : Window
                     "· 索引服务增加异常退出自动重启",
             AssetName = "Pathleap-1.0.2-win-x64-setup.exe",
             AssetSize = 36_700_000,
-            AssetUrl = "https://github.com/yunyu697/pathleap-releases/releases/download/v1.0.2/Pathleap-1.0.2-win-x64-setup.exe",
+            AssetUrl = "https://github.com/yunyu697/pathleap/releases/download/v1.0.2/Pathleap-1.0.2-win-x64-setup.exe",
             AssetSha256 = new string('a', 64),
             MinimumSystemText = "Windows 10.0.17763.0 · .NET 8.0 · Windows App Runtime 2.6.5",
             Message = "清单已验签 · 最低 Windows 10.0.17763.0",
@@ -426,7 +426,7 @@ public sealed partial class UpdateWindow : Window
             case "found":
                 _lpInfo = lpSample;
                 ShowFound(lpSample);
-                AssetInfoText.Text = "预览数据：正式检查会读取公开发布仓库 latest.json 并验签。";
+                AssetInfoText.Text = "预览数据：正式检查会读取主仓库最新 Release 的 latest.json 并验签。";
                 break;
             case "downloading":
                 _lpInfo = lpSample;
@@ -442,7 +442,7 @@ public sealed partial class UpdateWindow : Window
                 DownloadedFileDetail.Text = $"{AppPaths.UpdatesRoot} · {FormatBytes(lpSample.AssetSize)}";
                 break;
             default:
-                ShowIdle("预览状态：检查逻辑会真实请求公开发布仓库的 latest.json。");
+                ShowIdle("预览状态：检查逻辑会真实请求主仓库最新 Release 的 latest.json。");
                 break;
         }
     }
@@ -480,7 +480,7 @@ public sealed partial class UpdateWindow : Window
     {
         if (_lpPreview)
         {
-            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从公开发布仓库下载并校验 SHA256。";
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从主仓库 Release 下载并校验 SHA256。";
             return;
         }
 
@@ -491,7 +491,7 @@ public sealed partial class UpdateWindow : Window
     {
         if (_lpPreview)
         {
-            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从公开发布仓库下载并校验 SHA256。";
+            AssetInfoText.Text = "预览状态：不会真的下载；正式版本会从主仓库 Release 下载并校验 SHA256。";
             return;
         }
 

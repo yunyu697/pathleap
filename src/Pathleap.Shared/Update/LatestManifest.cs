@@ -5,7 +5,7 @@ using Pathleap.Shared.Ipc;
 namespace Pathleap.Shared.Update;
 
 /// <summary>
-/// 公开发布仓库的 <c>latest.json</c> 清单。签名覆盖 <see cref="BuildSignedContent"/> 的字节，
+/// 公开主仓库最新 Release 的 <c>latest.json</c> 清单。签名覆盖 <see cref="BuildSignedContent"/> 的字节，
 /// 客户端只用签名文本覆盖字段，避免「清单里有些字段没签」的缺口。
 /// </summary>
 public sealed class LatestManifest

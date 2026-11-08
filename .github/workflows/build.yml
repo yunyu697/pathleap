@@ -1,9 +1,9 @@
 name: build
 
-# GitHub 上只保留 tag 作为版本标记：不创建 Release、不上传任何产物资产、不发包。
-# 安装包与便携 zip 只在本地用 tools/ 脚本生成（见 README §6）。
+# tag v* 触发完整发布链路：校验 → 编译 → 打包 zip + 安装包 → 创建/更新 Release 并上传资产。
+# main / PR 只做校验与编译，不打包、不发布。
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: 检出
@@ -26,7 +26,7 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: 解析版本号（tag 仅作版本标记，校验格式后注入编译）
+      - name: 解析版本号
         id: lpver
         shell: pwsh
         run: |
@@ -48,6 +48,7 @@ jobs:
           }
 
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$LpVersion"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifactName=Pathleap-$LpVersion-win-x64"
 
       - name: 脚本变量命名检查
         shell: pwsh
@@ -61,10 +62,122 @@ jobs:
         shell: pwsh
         run: ./tools/Build-Lp.ps1 -LpConfiguration Release -LpSkipVariableCheck -LpVersion '${{ steps.lpver.outputs.version }}'
 
-      - name: 说明（tag 只做版本标记）
+      - name: 打包便携版 zip（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: ./tools/Package-Lp.ps1 -LpConfiguration Release
+
+      - name: 安装 Inno Setup（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: 生成安装包（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: ./tools/Package-LpInstaller.ps1 -LpConfiguration Release
+
+      - name: 核对产物与完整性（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -eq 'tag') {
-            Write-Host "tag ${{ github.ref_name }} 仅作版本标记：本次只做编译校验与发布工具自检。"
-            Write-Host "不创建 Release、不上传资产；zip 与安装包请在本地用 tools/Package-Lp.ps1 与 tools/Package-LpInstaller.ps1 生成。"
+          $LpVersion = '${{ steps.lpver.outputs.version }}'
+          $LpZipPath = "dist/Pathleap-$LpVersion-win-x64.zip"
+          $LpSetupPath = "dist/Pathleap-$LpVersion-win-x64-setup.exe"
+          $LpExpectBootstrap = 'runtimes/win-x64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll'
+
+          Get-ChildItem -Path dist -File | Select-Object Name, Length | Format-Table -AutoSize
+
+          if (-not (Test-Path -LiteralPath $LpZipPath)) { throw "缺少便携包: $LpZipPath" }
+          if (-not (Test-Path -LiteralPath $LpSetupPath)) { throw "缺少安装包: $LpSetupPath" }
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $LpArchive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $LpZipPath).Path)
+          try {
+            $LpEntries = $LpArchive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
+            if (-not ($LpEntries -contains $LpExpectBootstrap)) {
+              throw "便携包缺少 $LpExpectBootstrap：上次遗漏过该运行时，拒绝发布"
+            }
           }
+          finally {
+            $LpArchive.Dispose()
+          }
+
+          Write-Host "产物完整性核对通过：$LpZipPath 含 $LpExpectBootstrap；安装包 $LpSetupPath 存在"
+
+      - name: 上传构建产物
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.lpver.outputs.artifactName }}
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布 GitHub Release（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LP_SIGNING_KEY: ${{ secrets.PATHLEAP_SIGNING_KEY }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $LpTag = "${{ github.ref_name }}"
+          $LpVersion = "${{ steps.lpver.outputs.version }}"
+          $LpNotesFile = "docs/$LpVersion-发布说明.md"
+          $LpZipPath = "dist/Pathleap-$LpVersion-win-x64.zip"
+          $LpSetupPath = "dist/Pathleap-$LpVersion-win-x64-setup.exe"
+          if (-not (Test-Path -LiteralPath $LpZipPath)) { throw "缺少便携包: $LpZipPath" }
+          if (-not (Test-Path -LiteralPath $LpSetupPath)) { throw "缺少安装包: $LpSetupPath" }
+          $LpAssets = @($LpZipPath, $LpSetupPath)
+
+          if (gh release view $LpTag 2>$null) {
+            gh release upload $LpTag @LpAssets --clobber
+            if ($LASTEXITCODE -ne 0) { throw '上传资产到 Release 失败' }
+            if (Test-Path -LiteralPath $LpNotesFile) {
+              gh release edit $LpTag --notes-file $LpNotesFile
+            }
+          }
+          elseif (Test-Path -LiteralPath $LpNotesFile) {
+            gh release create $LpTag @LpAssets --title "Pathleap $LpVersion" --notes-file $LpNotesFile
+            if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
+          }
+          else {
+            gh release create $LpTag @LpAssets --title "Pathleap $LpVersion" --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
+          }
+
+          # 清单签名：私钥只来自 secret；seed 公钥必须与客户端内置公钥一致，否则直接失败。
+          if ([string]::IsNullOrWhiteSpace($env:LP_SIGNING_KEY)) {
+            Write-Warning "未配置 PATHLEAP_SIGNING_KEY，本次未生成清单（不生成、也不上传未签名的 latest.json）。"
+            Write-Host "::warning title=本次未生成清单::缺少 PATHLEAP_SIGNING_KEY；zip/setup 已上传，latest.json 与 latest.json.sig 未生成。"
+            exit 0
+          }
+
+          $LpKeyFile = Join-Path $env:RUNNER_TEMP 'lp-signing-seed.b64'
+          Set-Content -LiteralPath $LpKeyFile -Value $env:LP_SIGNING_KEY.Trim() -NoNewline -Encoding ascii
+
+          dotnet run --project src/Pathleap.ReleaseTool -- create `
+            --version $LpVersion --tag $LpTag `
+            --notes-file $LpNotesFile `
+            --installer $LpSetupPath --portable $LpZipPath `
+            --out dist/latest.json --sig-out dist/latest.json.sig `
+            --released-at ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+            --seed-file $LpKeyFile
+          if ($LASTEXITCODE -ne 0) { throw '生成并签名 latest.json 失败（seed 与客户端内置公钥不一致？）' }
+
+          dotnet run --project src/Pathleap.ReleaseTool -- verify --manifest dist/latest.json
+          if ($LASTEXITCODE -ne 0) { throw 'latest.json 验签失败，拒绝上传' }
+
+          gh release upload $LpTag dist/latest.json dist/latest.json.sig --clobber
+          if ($LASTEXITCODE -ne 0) { throw '上传 latest.json / latest.json.sig 失败' }
+
+          gh release view $LpTag --json name,tagName,assets
+
+      - name: 说明（非 tag 只做校验）
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        shell: pwsh
+        run: |
+          Write-Host "非 tag 构建：只做版本解析、脚本变量检查、发布工具自检与编译，不打包、不创建 Release。"
