@@ -77,6 +77,12 @@ public sealed partial class TrayMenuWindow : Window
         RootGrid.RequestedTheme = ThemeService.Instance.ElementTheme;
         RootGrid.Background = ThemeService.Instance.SurfaceBrush;
         WindowChrome.Apply(this, ThemeService.Instance.WindowBorderColor, ThemeService.Instance.IsDark);
+
+        // 菜单项在代码里建，配色切换后重建以替换已写入的画刷实例。
+        if (ItemsPanel.Children.Count > 0)
+        {
+            BuildItems();
+        }
     }
 
     private static FontIcon MakeIcon(string glyph)

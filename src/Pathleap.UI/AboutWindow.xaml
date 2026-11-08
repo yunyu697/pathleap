@@ -21,15 +21,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border x:Name="BrandDot" Width="40" Height="40" CornerRadius="11" VerticalAlignment="Center">
-                        <TextBlock x:Name="BrandMarkText"
-                                   Text="名"
-                                   FontSize="14"
-                                   FontWeight="Bold"
-                                   Foreground="#FFFFFF"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center" />
-                    </Border>
+                    <Border x:Name="BrandDot" Width="40" Height="40" CornerRadius="11" VerticalAlignment="Center" />
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                         <TextBlock x:Name="ProductNameText" Text="Pathleap" FontSize="16" FontWeight="SemiBold" Foreground="{ThemeResource Text1Brush}" />
                         <TextBlock x:Name="ProductSubText" Text="Windows 快速定位工具" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />

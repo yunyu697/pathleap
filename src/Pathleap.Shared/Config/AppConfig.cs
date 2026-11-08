@@ -33,8 +33,11 @@ public sealed class AppConfig
     /// <summary>主题：System / Light / Dark。</summary>
     public string ThemeMode { get; set; } = "Dark";
 
-    /// <summary>强调色（#RRGGBB），同步到选中态与高亮片段。</summary>
-    public string AccentColor { get; set; } = "#3D6EF7";
+    /// <summary>
+    /// 配色方案标识（indigo / violet / aurora / forest / ember）。
+    /// 与 ThemeMode 互不影响：明暗只决定 light/dark/system，配色方案决定整套颜色令牌。
+    /// </summary>
+    public string ColorTheme { get; set; } = "indigo";
 
     /// <summary>窗口不透明度（0.6–1.0）；与磨砂背景搭配使用。</summary>
     public double WindowOpacity { get; set; } = 0.92;
@@ -107,9 +110,9 @@ public sealed class AppConfig
             ThemeMode = "Dark";
         }
 
-        if (!IsHexColor(AccentColor))
+        if (ColorTheme is not ("indigo" or "violet" or "aurora" or "forest" or "ember"))
         {
-            AccentColor = "#3D6EF7";
+            ColorTheme = "indigo";
         }
 
         WindowOpacity = Math.Clamp(WindowOpacity, 0.6, 1.0);
@@ -140,15 +143,5 @@ public sealed class AppConfig
         {
             Product = Branding.ProductId;
         }
-    }
-
-    private static bool IsHexColor(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value.Length != 7 || value[0] != '#')
-        {
-            return false;
-        }
-
-        return value.Skip(1).All(static c => Uri.IsHexDigit(c));
     }
 }

@@ -25,7 +25,6 @@ public sealed partial class AboutWindow : Window
         RootGrid.Loaded += (_, _) => DispatcherQueue.TryEnqueue(() => lpKeySink.Focus(FocusState.Programmatic));
 
         Title = $"关于 {Branding.DisplayName}";
-        BrandMarkText.Text = Branding.Mark;
         ProductNameText.Text = Branding.DisplayName;
         ProductSubText.Text = Branding.ChineseName;
         VersionText.Text = Branding.Version;
@@ -50,19 +49,20 @@ public sealed partial class AboutWindow : Window
         ExtendsContentIntoTitleBar = true;
         NcFrame.Apply(this);
 
-        RootGrid.RequestedTheme = Theme.ThemeService.Instance.ElementTheme;
-        RootGrid.Background = Theme.ThemeService.Instance.SurfaceBrush;
-        WindowChrome.Apply(this, Theme.ThemeService.Instance.WindowBorderColor, Theme.ThemeService.Instance.IsDark);
-        var lpGradient = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        lpGradient.GradientStops.Add(new GradientStop { Color = Theme.ThemeService.Instance.Accent, Offset = 0 });
-        lpGradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 122, 92, 255), Offset = 1 });
-        BrandDot.Background = lpGradient;
+        ApplyTheme();
+        Theme.ThemeService.Instance.Changed += ApplyTheme;
+        Closed += (_, _) => Theme.ThemeService.Instance.Changed -= ApplyTheme;
 
         ResizeAndCenter();
+    }
+
+    private void ApplyTheme()
+    {
+        var lpTheme = Theme.ThemeService.Instance;
+        RootGrid.RequestedTheme = lpTheme.ElementTheme;
+        RootGrid.Background = lpTheme.SurfaceBrush;
+        WindowChrome.Apply(this, lpTheme.WindowBorderColor, lpTheme.IsDark);
+        BrandDot.Background = lpTheme.BrandMarkBrush;
     }
 
     private void ResizeAndCenter()

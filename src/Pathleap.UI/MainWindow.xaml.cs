@@ -76,7 +76,6 @@ public sealed partial class MainWindow : Window
         _lpHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _lpDispatcher = DispatcherQueue;
         Title = $"{Branding.DisplayName} · {Branding.ChineseName}";
-        BrandMarkText.Text = Branding.Mark;
         ResultsItems.ItemsSource = _lpRows;
 
         ConfigureWindow();
@@ -146,17 +145,10 @@ public sealed partial class MainWindow : Window
         WindowChrome.Apply(this, _lpTheme.WindowBorderColor, _lpTheme.IsDark);
         RootBorder.Background = _lpTheme.AcrylicEnabled
             ? _lpTheme.WindowBackgroundBrush
-            : new SolidColorBrush(_lpTheme.IsDark ? Color.FromArgb(255, 23, 26, 33) : Microsoft.UI.Colors.White);
+            : _lpTheme.SurfaceBrush;
         RootBorder.CornerRadius = new CornerRadius(14);
 
-        var lpGradient = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        lpGradient.GradientStops.Add(new GradientStop { Color = _lpTheme.Accent, Offset = 0 });
-        lpGradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 122, 92, 255), Offset = 1 });
-        BrandDot.Background = lpGradient;
+        BrandDot.Background = _lpTheme.BrandMarkBrush;
 
         PinButton.Foreground = new SolidColorBrush(_lpTheme.Accent);
         PinButton.Opacity = _lpConfig.PinWindow ? 1.0 : 0.45;
@@ -1031,6 +1023,8 @@ public sealed class LpResultRow : INotifyPropertyChanged
         IsSelected ? ThemeService.Instance.SelectionBorderBrush : ThemeService.Instance.TransparentBrush;
 
     public Brush EnterBackground => ThemeService.Instance.AccentBrush;
+
+    public Brush EnterForeground => ThemeService.Instance.AccentInkBrush;
 
     public Brush IconBackground { get; init; } = ThemeService.Instance.TransparentBrush;
 

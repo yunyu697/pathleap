@@ -140,7 +140,7 @@ public sealed partial class QuickSwitchWindow : Window
             : ThemeService.Instance.Border1Brush;
         RootBorder.BorderThickness = new Thickness(_lpKeyboardActive ? 1.5 : 1);
 
-        BrandDot.Background = ThemeService.Instance.AccentSoftBrush;
+        BrandDot.Background = ThemeService.Instance.BrandMarkBrush;
         TitleText.Foreground = ThemeService.Instance.Text1Brush;
         SubtitleText.Foreground = ThemeService.Instance.Text3Brush;
         CountText.Foreground = ThemeService.Instance.Text3Brush;
@@ -148,10 +148,10 @@ public sealed partial class QuickSwitchWindow : Window
         HintChip.Background = ThemeService.Instance.TrackOffBrush;
         HintChip.BorderBrush = ThemeService.Instance.TrackOffBorderBrush;
 
-        var lpIcon = BrandDot.Child as FontIcon;
-        if (lpIcon is not null)
+        // 文件夹卡片是在代码里建的一次性控件，配色变了要重建才能换掉已写入的画刷实例。
+        if (ChipsPanel.Children.Count > 0)
         {
-            lpIcon.Foreground = ThemeService.Instance.AccentBrush;
+            BuildChips();
         }
     }
 
@@ -687,7 +687,7 @@ public sealed partial class QuickSwitchWindow : Window
                 FontSize = 9,
                 FontFamily = new FontFamily("Consolas"),
                 FontWeight = lpSelected ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-                Foreground = lpSelected ? new SolidColorBrush(Microsoft.UI.Colors.White) : ThemeService.Instance.Text3Brush,
+                Foreground = lpSelected ? ThemeService.Instance.AccentInkBrush : ThemeService.Instance.Text3Brush,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             }

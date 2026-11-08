@@ -39,15 +39,10 @@ public sealed partial class UpdateWindow : Window
         RootGrid.Loaded += (_, _) => DispatcherQueue.TryEnqueue(() => lpKeySink.Focus(FocusState.Programmatic));
 
         Title = $"检查更新 · {Branding.DisplayName}";
-        CaptionMarkText.Text = Branding.Mark;
-        IdleMarkText.Text = Branding.Mark;
-        FoundMarkText.Text = Branding.Mark;
         IdleProductText.Text = Branding.DisplayName;
         IdleVersionText.Text = $"当前版本 {Branding.Version}";
 
         ConfigureWindow();
-        ExtendsContentIntoTitleBar = true;
-        SetTitleBar(CaptionBar);
 
         ApplyTheme();
         Theme.ThemeService.Instance.Changed += ApplyTheme;
@@ -61,10 +56,37 @@ public sealed partial class UpdateWindow : Window
             lpPresenter.IsResizable = false;
             lpPresenter.IsMaximizable = false;
             lpPresenter.IsMinimizable = false;
+            try
+            {
+                // 去掉系统标题栏与系统关闭按钮，否则会和自绘关闭按钮在同一位置叠成两个图标。
+                lpPresenter.SetBorderAndTitleBar(false, false);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"更新窗无边框设置失败: {ex.Message}");
+            }
         }
 
         AppWindow.IsShownInSwitchers = false;
+        NcFrame.Apply(this);
         ResizeAndCenter();
+    }
+
+    /// <summary>标题栏空白处拖动窗口；按在按钮上时不拦截，交给按钮自己处理点击。</summary>
+    private void OnCaptionBarPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var lpSource = e.OriginalSource as DependencyObject;
+        while (lpSource is not null)
+        {
+            if (lpSource is Controls.CaptionButton)
+            {
+                return;
+            }
+
+            lpSource = VisualTreeHelper.GetParent(lpSource);
+        }
+
+        Platform.WindowChrome.BeginDrag(this);
     }
 
     private void ResizeAndCenter()
@@ -90,18 +112,15 @@ public sealed partial class UpdateWindow : Window
         RootGrid.RequestedTheme = Theme.ThemeService.Instance.ElementTheme;
         RootGrid.Background = Theme.ThemeService.Instance.SurfaceBrush;
         Platform.WindowChrome.Apply(this, Theme.ThemeService.Instance.WindowBorderColor, Theme.ThemeService.Instance.IsDark);
-        RootGrid.Resources["AccentBrush"] = Theme.ThemeService.Instance.AccentBrush;
-        RootGrid.Resources["AccentSoftBrush"] = Theme.ThemeService.Instance.AccentSoftBrush;
-        RootGrid.Resources["AccentSoft2Brush"] = Theme.ThemeService.Instance.AccentSoft2Brush;
         BuildBrandDots();
     }
 
     private void BuildBrandDots()
     {
-        var lpAccent = Theme.ThemeService.Instance.Accent;
-        CaptionDot.Background = MakeGradient(lpAccent, Color.FromArgb(255, 122, 92, 255), 0);
-        IdleMark.Background = MakeGradient(lpAccent, Color.FromArgb(255, 122, 92, 255), 8);
-        FoundMark.Background = MakeGradient(lpAccent, Color.FromArgb(255, 122, 92, 255), 0);
+        var lpTheme = Theme.ThemeService.Instance;
+        CaptionDot.Background = lpTheme.BrandMarkBrush;
+        IdleMark.Background = lpTheme.BrandMarkBrush;
+        FoundMark.Background = lpTheme.BrandMarkBrush;
         DownloadedMark.Background = MakeGradient(
             Color.FromArgb(255, 53, 180, 127),
             Color.FromArgb(255, 30, 138, 98),

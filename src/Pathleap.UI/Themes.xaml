@@ -5,7 +5,8 @@
 -->
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Pathleap.UI.Controls">
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
@@ -28,6 +29,14 @@
             <SolidColorBrush x:Key="HlRow2Brush" Color="#335382F4" />
             <SolidColorBrush x:Key="MarkBgBrush" Color="#339090FF" />
             <SolidColorBrush x:Key="MarkInkBrush" Color="#A9C3FF" />
+
+            <!-- 强调色令牌：运行期由 ThemeService 按当前配色方案改写。 -->
+            <SolidColorBrush x:Key="AccentBrush" Color="#3563E6" />
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#3F6BE8" />
+            <SolidColorBrush x:Key="AccentPressedBrush" Color="#294FBD" />
+            <SolidColorBrush x:Key="AccentInkBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#1A3563E6" />
+            <SolidColorBrush x:Key="AccentSoft2Brush" Color="#333563E6" />
 
             <SolidColorBrush x:Key="OkBrush" Color="#2E9E6B" />
             <SolidColorBrush x:Key="WarnBrush" Color="#C77A18" />
@@ -62,6 +71,14 @@
             <SolidColorBrush x:Key="MarkBgBrush" Color="#293D6EF7" />
             <SolidColorBrush x:Key="MarkInkBrush" Color="#1F4FD8" />
 
+            <!-- 强调色令牌：运行期由 ThemeService 按当前配色方案改写。 -->
+            <SolidColorBrush x:Key="AccentBrush" Color="#2F5BD6" />
+            <SolidColorBrush x:Key="AccentHoverBrush" Color="#3563EA" />
+            <SolidColorBrush x:Key="AccentPressedBrush" Color="#2446A8" />
+            <SolidColorBrush x:Key="AccentInkBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#1A2F5BD6" />
+            <SolidColorBrush x:Key="AccentSoft2Brush" Color="#332F5BD6" />
+
             <SolidColorBrush x:Key="OkBrush" Color="#2E9E6B" />
             <SolidColorBrush x:Key="WarnBrush" Color="#C77A18" />
             <SolidColorBrush x:Key="DangerBrush" Color="#D9503F" />
@@ -74,4 +91,32 @@
             </LinearGradientBrush>
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+
+    <!--
+      标题栏按钮：所有按钮共用同一模板，颜色由 CaptionButton 按当前配色方案 token 写入。
+      模板不带任何系统按钮的悬停/按下底色（默认 Button 模板会带入系统浅色块，正是颜色不一致的来源），
+      只保留一个 ContentPresenter，让字形与背景完全受 token 控制。
+    -->
+    <Style x:Key="LpCaptionButtonStyle" TargetType="controls:CaptionButton">
+        <Setter Property="Width" Value="46" />
+        <Setter Property="Height" Value="40" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="UseSystemFocusVisuals" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:CaptionButton">
+                    <Grid x:Name="Root" Background="{TemplateBinding Background}">
+                        <ContentPresenter
+                            Content="{TemplateBinding Content}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

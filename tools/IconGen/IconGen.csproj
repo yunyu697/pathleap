@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    品牌图标生成器：把 assets/brand 下的 SVG 设计还原成多尺寸 .ico 与界面用 PNG。
+    只依赖 WPF 自带的绘图/PNG 编码，不引入第三方包，CI 与本机都能离线跑。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Pathleap.IconGen</AssemblyName>
+    <RootNamespace>Pathleap.IconGen</RootNamespace>
+  </PropertyGroup>
+</Project>

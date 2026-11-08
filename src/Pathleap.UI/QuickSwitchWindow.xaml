@@ -24,9 +24,7 @@
                         Width="20"
                         Height="20"
                         CornerRadius="5"
-                        VerticalAlignment="Center">
-                    <FontIcon Glyph="&#xE8B7;" FontSize="11" />
-                </Border>
+                        VerticalAlignment="Center" />
 
                 <StackPanel Grid.Column="1" Spacing="0" VerticalAlignment="Center">
                     <TextBlock x:Name="TitleText"

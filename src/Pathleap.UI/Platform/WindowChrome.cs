@@ -44,4 +44,31 @@ internal static class WindowChrome
             AppLog.Warn($"窗口外轮廓设置失败: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// 无系统标题栏的窗口自己发起拖动。把标题栏区域的按下消息转成 HTCAPTION 交给系统，
+    /// 由系统走标准移动循环，缩放、吸附与多显示器行为都保持不变。
+    /// </summary>
+    public static void BeginDrag(Window window)
+    {
+        try
+        {
+            var lpHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            ReleaseCapture();
+            SendMessage(lpHwnd, WmNcLButtonDown, HtCaption, IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"窗口拖动失败: {ex.Message}");
+        }
+    }
+
+    private const uint WmNcLButtonDown = 0x00A1;
+    private static readonly IntPtr HtCaption = new(2);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 }

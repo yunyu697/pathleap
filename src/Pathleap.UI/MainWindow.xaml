@@ -54,15 +54,7 @@
                             Width="22"
                             Height="22"
                             CornerRadius="7"
-                            VerticalAlignment="Center"
-                            >
-                        <TextBlock x:Name="BrandMarkText"
-                                   FontSize="10"
-                                   FontWeight="Bold"
-                                   Foreground="#FFFFFF"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center" />
-                    </Border>
+                            VerticalAlignment="Center" />
 
                     <TextBox x:Name="SearchBox"
                              Grid.Column="1"
@@ -264,7 +256,7 @@
                                                     <TextBlock Text="↵"
                                                                FontSize="10"
                                                                FontFamily="Segoe UI Symbol"
-                                                               Foreground="#FFFFFF"
+                                                               Foreground="{x:Bind EnterForeground, Mode=OneWay}"
                                                                HorizontalAlignment="Center"
                                                                VerticalAlignment="Center" />
                                                 </Border>
