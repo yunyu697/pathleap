@@ -20,7 +20,9 @@ public static class DirectoryIndexSource
         var lpBuilder = new IndexBuilder();
         var lpSkipped = 0;
 
-        var lpRootFull = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar);
+        // 必须保留根路径的尾部分隔符：卷根 "C:\" 裁成 "C:" 会变成「盘符相对路径」，
+        // 由构建子进程的工作目录决定实际目录；安装目录在 C: 时会把整卷误扫成安装目录（只得到几十条）。
+        var lpRootFull = Path.GetFullPath(rootPath);
         var lpPathRoot = Path.GetPathRoot(lpRootFull) ?? lpRootFull;
         var lpVolumeLabel = lpPathRoot.TrimEnd(Path.DirectorySeparatorChar);
 
@@ -121,7 +123,7 @@ public static class DirectoryIndexSource
 
         progress?.Invoke(new IndexBuildProgress { Phase = "scan", Scanned = lpBuilder.Count });
         var lpBuildMs = (Stopwatch.GetTimestamp() - lpStarted) * 1000.0 / Stopwatch.Frequency;
-        var lpSource = $"walk:{lpRootFull}";
+        var lpSource = $"walk:{lpRootFull.TrimEnd(Path.DirectorySeparatorChar)}";
         AppLog.Info($"目录遍历完成：{lpBuilder.Count} 条，跳过 {lpSkipped}，耗时 {lpBuildMs:0}ms");
 
         // 落盘阶段（排序 + 序列化 + 写盘）不再有逐条进度，只报总量与阶段，便于 UI 说明「正在写入索引」。
