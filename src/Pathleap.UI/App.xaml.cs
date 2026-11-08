@@ -637,7 +637,11 @@ public partial class App : Application
         }
 
         _lpDialogWatcher = new FileDialogWatcher();
-        _lpDialogWatcher.DialogAppeared += info => EnsureQuickBar(info);
+        _lpDialogWatcher.DialogAppeared += info =>
+        {
+            var lpBar = EnsureQuickBar(info);
+            lpBar.SetForegroundActive(NativeMethods.GetForegroundWindow() == info.Handle);
+        };
         _lpDialogWatcher.DialogDestroyed += handle =>
         {
             if (_lpQuickBars.TryGetValue(handle, out var lpBar))
@@ -655,6 +659,7 @@ public partial class App : Application
         _lpDialogWatcher.ForegroundChanged += handle =>
         {
             PruneDeadBars();
+            SyncBarVisibility(handle);
             UpdateKeyboardBarForForeground(handle);
         };
 
@@ -663,6 +668,22 @@ public partial class App : Application
         {
             _lpDialogWatcher.Track(lpDialog.Handle);
             EnsureQuickBar(lpDialog);
+        }
+
+        SyncBarVisibility(NativeMethods.GetForegroundWindow());
+    }
+
+    /// <summary>只让前台对话框那条栏可见：互叠时后台栏不会压在其它对话框上。</summary>
+    private void SyncBarVisibility(IntPtr foreground)
+    {
+        if (_lpQuickBars.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var lpPair in _lpQuickBars)
+        {
+            lpPair.Value.SetForegroundActive(lpPair.Key == foreground);
         }
     }
 

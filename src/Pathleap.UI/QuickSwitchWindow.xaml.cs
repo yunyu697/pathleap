@@ -42,6 +42,7 @@ public sealed partial class QuickSwitchWindow : Window
     private int _lpBarWidthPx = 426;
     private int _lpBarHeightPx = 78;
     private double _lpScale = 1.0;
+    private bool _lpForegroundActive = true;
 
     private readonly record struct QuickFolder(string Name, string Path, bool IsCurrent);
 
@@ -70,6 +71,21 @@ public sealed partial class QuickSwitchWindow : Window
     public bool IsAttached => _lpDialog.IsFileDialog;
 
     public bool IsKeyboardActive => _lpKeyboardActive;
+
+    /// <summary>
+    /// 只让前台对话框对应的那条栏可见。栏在对话框矩形之外，两个对话框互相重叠时，
+    /// 后台那条必然压在更前面或更后面窗口上；直接隐藏即可彻底避免遮挡，切回时再显示。
+    /// </summary>
+    public void SetForegroundActive(bool active)
+    {
+        if (_lpDetached || !IsAttached || _lpForegroundActive == active)
+        {
+            return;
+        }
+
+        _lpForegroundActive = active;
+        QuickSwitchNative.ShowWindow(_lpHandle, active ? QuickSwitchNative.SwShowNoActivate : QuickSwitchNative.SwHide);
+    }
 
     private void ConfigureWindow()
     {
@@ -309,7 +325,7 @@ public sealed partial class QuickSwitchWindow : Window
                 lpBar.Y,
                 lpBar.Width,
                 lpBar.Height,
-                QuickSwitchNative.SwpNoActivate | QuickSwitchNative.SwpShowWindow);
+                QuickSwitchNative.SwpNoActivate | (_lpForegroundActive ? QuickSwitchNative.SwpShowWindow : 0));
 
             AppLog.Info($"快速切换栏贴边: dialog=({lpFrame.Left},{lpFrame.Top},{lpFrame.Width}x{lpFrame.Height}) " +
                         $"bar=({lpBar.X},{lpBar.Y},{lpBar.Width}x{lpBar.Height}) scale={_lpScale:0.##} folders={_lpFolders.Count} " +
