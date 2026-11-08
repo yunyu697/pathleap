@@ -15,6 +15,13 @@ internal static class QuickSwitchLayout
     /// <summary>宽度达到这个 DIP 值时内容改成 6 列，否则 3 列。</summary>
     public const double WideColumnsMinDip = 680;
 
+    /// <summary>
+    /// 宽度低于这个 DIP 值时改成 2 列。3 列时每格可用文字宽度只有约 56 DIP（4–5 个汉字就被省略），
+    /// 2 列把单格文字提到约 100 DIP，代价是多一行（6 个文件夹时 3 行，仍在 6 行上限内）。
+    /// 该阈值对应「3 列时单格文字不足约 70 DIP」：3×(70+37)+24+10 ≈ 355 DIP。
+    /// </summary>
+    public const double NarrowColumnsMaxDip = 360;
+
     /// <summary>栏与对话框之间的视觉间距（DIP）。</summary>
     public const double GapDip = 2;
 
@@ -22,7 +29,14 @@ internal static class QuickSwitchLayout
 
     public static int Columns(int widthPx, double scale)
     {
-        return widthPx >= (int)Math.Round(WideColumnsMinDip * scale) ? MaxRows : 3;
+        var lpWide = (int)Math.Round(WideColumnsMinDip * scale);
+        var lpNarrow = (int)Math.Round(NarrowColumnsMaxDip * scale);
+        if (widthPx >= lpWide)
+        {
+            return MaxRows;
+        }
+
+        return widthPx < lpNarrow ? 2 : 3;
     }
 
     public static int Height(int widthPx, double scale, int folderCount)

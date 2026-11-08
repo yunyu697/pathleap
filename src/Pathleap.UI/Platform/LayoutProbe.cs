@@ -110,7 +110,7 @@ internal static class LayoutProbe
             work.Top + work.Height * 0.25, scale);
         lpResults.Add(Case("regular", scale, lpWide, lpPixelWork, 6));
 
-        // 窄对话框：宽度不足一半列阈值，必须退回 3 列且栏宽仍为一半。
+        // 窄对话框：低于 360 DIP 退到 2 列（单格文字更宽），栏宽仍为一半，6 个文件夹排成 3 行。
         var lpNarrow = Dialog(work, NarrowDialogWidthDip, NarrowDialogHeightDip,
             work.Left + 24, work.Top + work.Height * 0.3, scale);
         lpResults.Add(Case("narrow", scale, lpNarrow, lpPixelWork, 6));
