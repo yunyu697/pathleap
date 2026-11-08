@@ -99,6 +99,14 @@ internal static class FileDialogInjector
 
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
+    /// <summary>仅按窗口类判断是否为系统 #32770 对话框，用于监视阶段的诊断日志。</summary>
+    public static bool HasStandardDialogClass(IntPtr hwnd)
+    {
+        return hwnd != IntPtr.Zero
+               && IsWindow(hwnd)
+               && string.Equals(ClassName(hwnd), DialogClass, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>在热键触发时调用：记录当前前台的文件对话框（此时浮层还没抢走前台）。</summary>
     public static FileDialogInfo CaptureActive() => Describe(GetForegroundWindow());
 

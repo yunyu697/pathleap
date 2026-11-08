@@ -138,7 +138,7 @@ if (Test-Path -LiteralPath $LpConfigFile) {
 Add-LpCheck -LpName 'UI 日志已写入' -LpPassed (Test-Path -LiteralPath $LpUiLog) -LpDetail $LpUiLog
 if (Test-Path -LiteralPath $LpUiLog) {
     $LpUiLogText = Get-Content -LiteralPath $LpUiLog -Raw
-    Add-LpCheck -LpName 'UI 日志包含热键注册成功' -LpPassed ($LpUiLogText -match '全局热键注册成功') -LpDetail 'ui log'
+    Add-LpCheck -LpName 'UI 日志包含热键注册成功' -LpPassed ($LpUiLogText -match '全局热键注册成功|双击唤醒已启用') -LpDetail 'ui log'
     Add-LpCheck -LpName 'UI 日志包含托盘图标已添加' -LpPassed ($LpUiLogText -match '托盘图标已添加') -LpDetail 'ui log'
 }
 

@@ -136,6 +136,11 @@ internal sealed class FileDialogWatcher : IDisposable
                 var lpInfo = FileDialogInjector.Describe(hwnd);
                 if (!lpInfo.IsFileDialog)
                 {
+                    if (FileDialogInjector.HasStandardDialogClass(hwnd))
+                    {
+                        AppLog.Info($"窗口类为 #32770 但标题不在白名单内，未挂栏: hwnd=0x{hwnd.ToInt64():X} event=0x{eventType:X}");
+                    }
+
                     return;
                 }
 

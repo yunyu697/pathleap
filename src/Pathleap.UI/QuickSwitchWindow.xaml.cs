@@ -27,10 +27,7 @@ namespace Pathleap.UI;
 /// </summary>
 public sealed partial class QuickSwitchWindow : Window
 {
-    private const int MaxRows = 6;
-    private const double RowHeightDip = 32;
-    private const double HeaderHeightDip = 34;
-    private const double BodyPaddingDip = 12;
+    private const int MaxRows = QuickSwitchLayout.MaxRows;
 
     private readonly AppConfig _lpConfig;
     private readonly List<QuickFolder> _lpFolders = new();
@@ -281,50 +278,42 @@ public sealed partial class QuickSwitchWindow : Window
             // 文件对话框可能是 DPI 不感知的进程（GetDpiForWindow 恒为 96），不能拿它算比例。
             _lpScale = ResolveScale(_lpDialog.Handle);
             var lpFrame = FileDialogInjector.GetFrameBounds(_lpDialog.Handle);
-            // 宽度严格取对话框的一半：与对话框对中咬合，同时保证不超出对话框范围。
-            var lpWidth = Math.Max(1, (int)Math.Round(lpFrame.Width * 0.5));
-            var lpHeight = ComputeHeight(lpWidth);
-            _lpBarWidthPx = lpWidth;
-            _lpBarHeightPx = lpHeight;
-            ReflowChips(lpWidth);
-
-            var lpX = lpFrame.Left + (lpFrame.Width - lpWidth) / 2;
 
             // 视觉边界（DWM 扩展外框）比窗口矩形小一圈不可见的缩放边框；
             // 贴到「窗口矩形」底边之外，避免压住底边的拖拽缩放热区。
             var lpWindowRect = default(NativeMethods.Rect);
             var lpHasWindowRect = QuickSwitchNative.GetWindowRect(_lpDialog.Handle, out lpWindowRect);
-            var lpBottom = lpHasWindowRect ? Math.Max(lpFrame.Bottom, lpWindowRect.Bottom) : lpFrame.Bottom;
-            var lpTop = lpHasWindowRect ? Math.Min(lpFrame.Top, lpWindowRect.Top) : lpFrame.Top;
-            var lpY = lpBottom + (int)Math.Round(2 * _lpScale);
 
             var lpMonitor = QuickSwitchNative.MonitorFromWindow(_lpDialog.Handle, QuickSwitchNative.MonitorDefaultToNearest);
             var lpMonitorInfo = new NativeMethods.MonitorInfo { Size = Marshal.SizeOf<NativeMethods.MonitorInfo>() };
             var lpHasWork = lpMonitor != IntPtr.Zero && NativeMethods.GetMonitorInfoW(lpMonitor, ref lpMonitorInfo);
-            if (lpHasWork)
-            {
-                // 水平方向不越出工作区。
-                lpX = Math.Clamp(lpX, lpMonitorInfo.Work.Left + 4, Math.Max(lpMonitorInfo.Work.Left + 4, lpMonitorInfo.Work.Right - 4 - lpWidth));
-                if (lpY + lpHeight > lpMonitorInfo.Work.Bottom)
-                {
-                    // 下方放不下就改贴到对话框上方，仍然不遮挡内容。
-                    lpY = lpTop - lpHeight - (int)Math.Round(2 * _lpScale);
-                }
 
-                lpY = Math.Max(lpY, lpMonitorInfo.Work.Top + 4);
-            }
+            var lpBar = QuickSwitchLayout.Attach(
+                lpFrame,
+                lpWindowRect,
+                lpHasWindowRect,
+                lpMonitorInfo.Work,
+                lpHasWork,
+                _lpScale,
+                _lpFolders.Count);
+
+            _lpBarWidthPx = lpBar.Width;
+            _lpBarHeightPx = lpBar.Height;
+            _lpColumns = lpBar.Columns;
+            BuildChips();
 
             QuickSwitchNative.SetWindowPos(
                 _lpHandle,
                 _lpDialog.Handle,
-                lpX,
-                lpY,
-                lpWidth,
-                lpHeight,
+                lpBar.X,
+                lpBar.Y,
+                lpBar.Width,
+                lpBar.Height,
                 QuickSwitchNative.SwpNoActivate | QuickSwitchNative.SwpShowWindow);
 
             AppLog.Info($"快速切换栏贴边: dialog=({lpFrame.Left},{lpFrame.Top},{lpFrame.Width}x{lpFrame.Height}) " +
-                        $"bar=({lpX},{lpY},{lpWidth}x{lpHeight}) scale={_lpScale:0.##} folders={_lpFolders.Count} " +
+                        $"bar=({lpBar.X},{lpBar.Y},{lpBar.Width}x{lpBar.Height}) scale={_lpScale:0.##} folders={_lpFolders.Count} " +
+                        $"columns={lpBar.Columns} " +
                         $"work=({lpMonitorInfo.Work.Left},{lpMonitorInfo.Work.Top},{lpMonitorInfo.Work.Right},{lpMonitorInfo.Work.Bottom})");
         }
         catch (Exception ex)
@@ -340,7 +329,7 @@ public sealed partial class QuickSwitchWindow : Window
             _lpScale = DpiUtil.Scale(this);
             var lpWork = DisplayArea.Primary.WorkArea;
             var lpWidth = (int)Math.Round(480 * _lpScale);
-            var lpHeight = ComputeHeight(lpWidth);
+            var lpHeight = QuickSwitchLayout.Height(lpWidth, _lpScale, _lpFolders.Count);
             _lpBarWidthPx = lpWidth;
             _lpBarHeightPx = lpHeight;
             ReflowChips(lpWidth);
@@ -353,14 +342,6 @@ public sealed partial class QuickSwitchWindow : Window
         {
             AppLog.Warn($"快速切换栏（预览）定位失败: {ex.Message}");
         }
-    }
-
-    private int ComputeHeight(int widthPx)
-    {
-        var lpColumns = widthPx >= (int)Math.Round(680 * _lpScale) ? MaxRows : 3;
-        _lpColumns = lpColumns;
-        var lpRows = (int)Math.Ceiling(Math.Min(MaxRows, Math.Max(1, _lpFolders.Count)) / (double)lpColumns);
-        return (int)Math.Round((HeaderHeightDip + Math.Max(1, lpRows) * RowHeightDip + BodyPaddingDip) * _lpScale);
     }
 
     /// <summary>把栏放到 owner（对话框/主窗）之后，保证只在它上方一层，不盖到别的应用。</summary>
@@ -596,7 +577,7 @@ public sealed partial class QuickSwitchWindow : Window
 
     private void ReflowChips(int widthPx)
     {
-        var lpNewColumns = widthPx >= (int)Math.Round(680 * _lpScale) ? MaxRows : 3;
+        var lpNewColumns = QuickSwitchLayout.Columns(widthPx, _lpScale);
         if (lpNewColumns != _lpColumns)
         {
             _lpColumns = lpNewColumns;
@@ -614,7 +595,7 @@ public sealed partial class QuickSwitchWindow : Window
         ChipsPanel.ColumnDefinitions.Clear();
         ChipsPanel.RowDefinitions.Clear();
 
-        _lpColumns = _lpBarWidthPx >= (int)Math.Round(680 * _lpScale) ? MaxRows : 3;
+        _lpColumns = QuickSwitchLayout.Columns(_lpBarWidthPx, _lpScale);
         for (var lpColumn = 0; lpColumn < _lpColumns; lpColumn++)
         {
             ChipsPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

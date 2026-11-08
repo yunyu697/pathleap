@@ -35,12 +35,21 @@ internal sealed class StartupOptions
     /// <summary>由计划任务拉起的实例：真实参数从 pending 文件恢复，避免循环提权。</summary>
     public bool ElevatedLaunch { get; set; }
 
+    /// <summary>离屏布局核对：--layout-probe=文件路径，按 100/125/150/200% 走一遍吸附栏几何并写 JSON。</summary>
+    public string LayoutProbeFile { get; set; } = string.Empty;
+
     public static StartupOptions Parse(string[] args)
     {
         var lpOptions = new StartupOptions();
         for (var lpIndex = 0; lpIndex < args.Length; lpIndex++)
         {
             var lpArg = args[lpIndex];
+            if (lpArg.StartsWith("--layout-probe=", StringComparison.OrdinalIgnoreCase))
+            {
+                lpOptions.LayoutProbeFile = lpArg["--layout-probe=".Length..].Trim();
+                lpOptions.ShowOnStart = false;
+                continue;
+            }
             if (lpArg.StartsWith("--screen=", StringComparison.OrdinalIgnoreCase))
             {
                 lpOptions.Screen = lpArg["--screen=".Length..].Trim();
@@ -115,6 +124,12 @@ public static class Program
         AppLog.Info($"UI {Branding.Version} 启动，PID={Environment.ProcessId}，args=[{string.Join(' ', args)}]");
         AppLog.Info($"配置: {AppPaths.ConfigFile}");
         AppLog.Info($"日志目录: {AppLog.LogDirectory}");
+
+        // 离屏布局核对：不建窗口、不开管道、不抢前台，写完 JSON 直接退出。
+        if (!string.IsNullOrEmpty(Startup.LayoutProbeFile))
+        {
+            return LayoutProbe.Run(Startup.LayoutProbeFile);
+        }
 
         // 计划任务拉起的实例：真实命令行通过本地文件交接（--tray / --quit 等都在里面）。
         if (Startup.ElevatedLaunch)
