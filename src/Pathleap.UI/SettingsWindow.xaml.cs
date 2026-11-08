@@ -692,7 +692,7 @@ public sealed partial class SettingsWindow : Window
         IndexChipsPanel.Children.Add(BuildChip("\uE8B7", DescribeSource(status.Source), false));
         if (!string.IsNullOrWhiteSpace(status.FilePath))
         {
-            IndexChipsPanel.Children.Add(BuildChip("\uE7C3", "索引文件 index.v4.db", false));
+            IndexChipsPanel.Children.Add(BuildChip("\uE7C3", $"索引文件 {Path.GetFileName(status.FilePath)}", false));
         }
     }
 
