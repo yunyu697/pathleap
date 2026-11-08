@@ -17,8 +17,8 @@ UI 是常驻托盘进程，索引与查询放在独立的长驻服务进程，�
 - UI 只负责窗口、热键、列表与键盘交互；索引构建、装载与查询全部在服务进程，避免大索引拖慢 UI 线程。
 - 索引是单个只读 mmap 文件，查询零拷贝；构建放到短生命周期子进程，构建期的 GB 级临时内存不留在常驻服务里。
 - 优先走 USN/MFT 主路径；拿不到卷句柄时降级目录遍历，保证功能可用。
-- 更新只读**公开发布仓库**的签名清单（无令牌）；但 GitHub 上只打 tag、不放任何产物，
-  当前没有 Release，因此更新检查必然返回 404，界面会明确提示而不是静默或谎报有更新。
+- 更新只读**公开主仓库**（`yunyu697/pathleap`）最新 Release 的签名清单（无令牌）；tag 触发 CI
+  构建 zip 与安装包，并连同 `latest.json`、`latest.json.sig` 一起发布到该 tag 的 Release。
 
 ### 已实现能力
 
@@ -42,17 +42,16 @@ UI 是常驻托盘进程，索引与查询放在独立的长驻服务进程，�
 | 底栏键帽提示区按设计稿重做 | 已实测（深/浅主题截图） | [1.0.4-发布说明](docs/1.0.4-发布说明.md) §6 |
 | 全局 `Ctrl+G` 任意位置唤出快速切换浮层 | 已实测（注册、真实按键、对话框识别） | `docs/shots/23`、[1.0.3-发布说明](docs/1.0.3-发布说明.md) §2 |
 | 文件对话框注入：标准「打开 / 另存为 / 选择文件夹」对话框内直接跳转 | 已实测（WinForms 标准对话框：路径写回并跳转到目标目录） | `docs/shots/22`、[1.0.3-发布说明](docs/1.0.3-发布说明.md) §3 |
-| 更新检查：只读公开发布仓库 `latest.json`（无令牌）、Ed25519 验签、下载后 SHA256 校验、镜像状态如实显示；无 Release 时明确报 404 | 已实测真实 404（手动检查红字提示 + 自动检查托盘告知）；清单/验签/篡改拒绝为本地验证 | [更新源与签名](docs/更新源与签名.md) §7 |
+| 更新检查：只读公开主仓库最新 Release 的 `latest.json`（无令牌）、Ed25519 验签、下载后 SHA256 校验、镜像状态如实显示；无清单时明确报 404 | 清单拉取/验签与下载校验已在本地闭环验证；真实 Release 拉取见 §7 | [更新源与签名](docs/更新源与签名.md) §7 |
 | 发布工具（`Pathleap.ReleaseTool`）：`gen-key` / `create` / `verify` / `selftest` | 本地验证（自检 22 项通过） | [更新源与签名](docs/更新源与签名.md) §7 |
 | 界面五屏（主窗、快速切换、设置四页、检查更新四态、托盘） | 已按设计稿还原，见 [界面对照](docs/界面对照.html)、[验收报告](docs/界面验收报告.md) | `docs/shots/` |
 
 ### 未完成项（明确不做已完成表述）
 
-- **GitHub 只打 tag、不发包**：不创建 Release、不上传任何产物资产；zip 与安装包只在本地 `dist/` 生成。
-  因此客户端更新检查读到的清单地址必然 404，界面明确提示「公开发布仓库暂无最新清单（HTTP 404）」，
-  自动检查也会写日志并在托盘提示「更新检查未完成」（气泡未截图验证），不会谎报有更新。
-- **公开发布仓库 `yunyu697/pathleap-releases` 不存在**：即使以后手工上传，也需自行创建仓库并托管
-  `latest.json`；流水线中的发布步骤已移除。
+- **`1.0.1`–`1.0.3` 的 Release 只有 zip 与安装包**：这几个 Release 早于清单机制，没有 `latest.json`，
+  因此清单地址在 1.0.4 发布前仍会 404；1.0.4 起由 tag 流水线同时上传清单与分离签名。
+- **清单缺失或网络失败只报错不猜测**：手动检查在窗内红字显示原因，自动检查写 WARN 日志并托盘提示
+  「更新检查未完成」（气泡未截图验证），不会谎报有更新。
 - **自动检查更新的失败只在托盘提示一次**：窗口内没有「上次检查结果」的历史记录，需要用户点「检查更新」才能看到完整原因。
 - **1.0.0–1.0.4 的客户端不能自动升级**：这些版本早于签名机制，没有内置公钥、读的是私有仓库 API（无令牌即 404），
   必须手动安装首个内置公钥的版本，并在该版本发布说明中写明。
@@ -73,8 +72,8 @@ UI 是常驻托盘进程，索引与查询放在独立的长驻服务进程，�
 
 ### 2.1 两种分发形式
 
-两种产物**只在本地构建生成**，放在 `dist/`；GitHub 上只打 tag 作版本标记，不创建 Release、不上传任何资产。
-源码仓库保持私有。
+tag 触发时由 CI 构建并上传到该 tag 的 Release；本机同样可以用两条 `Package-*` 脚本产出等价产物，放在 `dist/`。
+仓库与 Release 均为公开（源码主仓库即更新源），客户端读取清单不需要任何令牌。
 
 | 产物 | 形式 | 适用场景 | 与另一种的差异 |
 | --- | --- | --- | --- |
@@ -309,7 +308,7 @@ Pathleap/
 ├── installer/                  Inno Setup 脚本与中文语言文件
 ├── tools/                      PowerShell 构建/打包/测试/基准脚本（自定义变量统一 Lp 前缀）
 ├── docs/                       里程碑报告、发布说明、版本规则、发布检查清单、界面对照
-└── .github/workflows/          CI：main/PR 编译校验与发布工具自检（不发包、不建 Release）
+└── .github/workflows/          CI：main/PR 校验与自检；tag 构建 zip/安装包并发布 Release（含签名清单）
 ```
 
 | 进程 | 职责 | 生命周期 |
@@ -346,26 +345,25 @@ dotnet run --project src/Pathleap.ReleaseTool -- verify --manifest dist/latest.j
 本机安装包编译可用 Inno Setup 6；脚本会依次查找 PATH、
 `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`、`%ProgramFiles%\Inno Setup 6\ISCC.exe`。
 
-CI（[build.yml](.github/workflows/build.yml)）在 main/PR 与 tag 上都只做校验，**不打包、不建 Release、不上传资产**：
+CI（[build.yml](.github/workflows/build.yml)）按触发条件区分：
 
-- 解析版本号（tag 校验 `v` 前缀与版本格式）；
-- 脚本变量命名检查；
-- 发布工具自检（`selftest`）；
-- Release 编译（UI / Service / Shared），tag 时把 tag 版本注入编译。
+- **main / PR**：解析版本号（校验格式）→ 脚本变量命名检查 → 发布工具 `selftest` → Release 编译，不产包、不发布。
+- **tag `v*`**：在上面的基础上，用 tag 版本注入编译，打包 zip 与安装包 → 核对 zip 必须包含
+  `runtimes\win-x64\native\Microsoft.WindowsAppRuntime.Bootstrap.dll` → 创建/更新该 tag 的 Release 并上传
+  `Pathleap-<版本>-win-x64.zip`、`Pathleap-<版本>-win-x64-setup.exe`；配置了 secret `PATHLEAP_SIGNING_KEY` 时
+  再生成并上传 `latest.json` 与 `latest.json.sig`（缺少 secret 会在日志与注解中告警，且不生成、不上传未签名清单）。
 
-zip 与安装包请在本机用上面两条 `Package-*` 脚本生成，发布资产不会出现在 GitHub 上。
-
-**CI 现状**：账户计费阻断，tag 流水线**未成功运行**；本轮不存在任何 CI 发布资产，也不声称已发布。
+本机仍可用上面两条 `Package-*` 脚本产出等价产物（备用路径），清单用 `ReleaseTool create` 本地签名。
 
 ## 7. 更新检查与签名清单
 
-- 客户端只请求公开仓库的 `latest.json`：
-  `https://github.com/yunyu697/pathleap-releases/releases/latest/download/latest.json`，**不携带任何令牌**，
+- 客户端只请求公开主仓库最新 Release 的 `latest.json`：
+  `https://github.com/yunyu697/pathleap/releases/latest/download/latest.json`，**不携带任何令牌**，
   没有第二套私有源逻辑。
-- **无 Release 时的实际表现（2026-11-08 实测）**：该地址真实返回 HTTP 404；客户端据此返回
-  「公开发布仓库暂无最新清单（HTTP 404）：<清单地址>」，手动检查在窗内以红字显示
-  「检查失败：公开发布仓库暂无最新清单（HTTP 404）…」；自动检查写 WARN 日志并以托盘提示
-  「更新检查未完成」告知（托盘气泡未截图验证），绝不显示「有新版本」。
+- **清单缺失时的表现（2026-11-08 实测）**：`1.0.1`–`1.0.3` 的 Release 只有 zip 与安装包，该地址真实返回 HTTP 404；
+  客户端据此返回「主仓库暂无最新清单（HTTP 404）：<清单地址>」，手动检查在窗内以红字显示
+  「检查失败：主仓库暂无最新清单（HTTP 404）…」；自动检查写 WARN 日志并以托盘提示「更新检查未完成」告知
+  （托盘气泡未截图验证），绝不显示「有新版本」。
 - 清单字段：`schemaVersion`、`version`、`tag`、`releasedAt`、`channel`、`platform`（`win-x64`）、
   `minimumSystem`（Windows / .NET Desktop / Windows App Runtime）、`assets`（文件名、大小、SHA256、URL）、`notes`、`signature`。
 - 验签：Ed25519（RFC 8032，托管实现），公钥内置在客户端；签名覆盖固定文本（含 URL 与 SHA256），
@@ -385,7 +383,7 @@ zip/安装包名、编译时注入版本都由它派生。规则摘要：
 
 - 格式 `<major>.<minor>.<patch>[-alpha<N>]`；`major` 不设上限，`minor` / `patch` 取 0–10，超过 10 向前进位。
 - 预发布用 `alphaN`；正式版落到数字版本（当前 `1.0.4`）。
-- tag 带 `v` 前缀（`v1.0.4`），**只作版本标记**：CI 校验 tag 格式并做编译校验，不打包、不创建 Release。
+- tag 带 `v` 前缀（`v1.0.4`）：CI 校验 tag 格式、注入版本编译、打包 zip 与安装包，并发布到该 tag 的 Release。
   升级用 `pwsh -File .\tools\Next-LpVersion.ps1 -LpBump patch -LpApply`。
 - 完整进位示例与「下一版是什么」见 [版本号规则](docs/版本号规则.md)。
 
@@ -404,15 +402,15 @@ zip/安装包名、编译时注入版本都由它派生。规则摘要：
 | [quick-switch-attach.md](docs/quick-switch-attach.md) | 快速切换栏吸附方案：SetParent 与 owner 两种路线的实测对比、随动/多实例/键盘路由、已知限制 |
 | [版本号规则](docs/版本号规则.md) | 单一来源、进位规则、tag 与 CI |
 | [发布检查清单](docs/发布检查清单.md) | 每次发版逐项核对（含 README 同步、产物、验签与密钥一致性） |
-| [更新源与签名](docs/更新源与签名.md) | 清单字段与验签口径、私钥固定约束、当前「只打 tag 不发布」策略、无 Release 时的 404 实测、本地 dry-run |
+| [更新源与签名](docs/更新源与签名.md) | 清单字段与验签口径、私钥固定约束、公开主仓库发布现状、清单缺失时的 404 实测、本地 dry-run |
 | [界面对照](docs/界面对照.html) | 五屏设计稿与实机截图并排对照、逐项差异与处理状态 |
 | [design-reference.html](docs/design-reference.html) | 原始设计稿（界面验收对照基准） |
 | [界面验收报告](docs/界面验收报告.md) | 设计稿要求 / 当前实现 / 差距 / 是否解决，含边框证据与未验证项 |
 
 ## 10. 已知限制与未完成项
 
-1. **GitHub 不存放任何产物**：只打 tag 作版本标记，无 Release、无资产；zip/setup 只在本地 `dist/` 生成。
-2. **更新检查当前必然 404**：`yunyu697/pathleap-releases` 未创建，客户端会显示「公开发布仓库暂无最新清单（HTTP 404）」
+1. **旧 Release 没有清单**：`1.0.1`–`1.0.3` 只上传了 zip 与安装包；清单机制自 1.0.4 起随 tag 流水线生效。
+2. **清单缺失或网络失败时更新检查报错**：客户端显示「主仓库暂无最新清单（HTTP 404）」等原始原因，
    并在自动检查时给出托盘提示；这是如实失败，不是静默，也不是「有新版本」。
 3. **旧版本需手动升级**：`1.0.0`–`1.0.4` 未内置公钥，不能自动升级。
 4. **自动建索引只在服务启动时判定一次**：缺失或构建超过 7 天才重建；运行期文件变化不自动触发，
