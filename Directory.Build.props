@@ -7,7 +7,7 @@
 <Project>
   <PropertyGroup>
     <!-- 语义化版本字符串：1.0.0 / 1.0.0-alpha1 / 1.1.0 / 2.0.0 ... -->
-    <PathleapVersion>1.0.4</PathleapVersion>
+    <PathleapVersion>1.0.5</PathleapVersion>
 
     <!-- 由上面的字符串自动去掉 -alphaN 后缀得到 1.0.0，供 AssemblyVersion / FileVersion 使用 -->
     <PathleapNumericVersion>$([System.String]::Copy('$(PathleapVersion)').Split('-')[0])</PathleapNumericVersion>
