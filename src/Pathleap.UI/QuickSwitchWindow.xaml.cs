@@ -63,7 +63,20 @@ public sealed partial class QuickSwitchWindow : Window
         ApplyTheme();
         LoadFolders();
         BuildChips();
+        AppWindow.Changed += OnAppWindowChanged;
         Closed += OnClosed;
+    }
+
+    /// <summary>
+    /// owner 被还原时系统会把它的附属窗口一并自动显示，这一步可能发生在几何事件之后。
+    /// 后台对话框的栏一旦被系统显示出来，立即收回，保证「只显示前台那条」在任何时点都成立。
+    /// </summary>
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (args.DidVisibilityChange && sender.IsVisible && !_lpDetached && !_lpForegroundActive)
+        {
+            QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
+        }
     }
 
     public IntPtr DialogHandle => _lpDialog.Handle;
@@ -84,7 +97,10 @@ public sealed partial class QuickSwitchWindow : Window
         }
 
         _lpForegroundActive = active;
-        QuickSwitchNative.ShowWindow(_lpHandle, active ? QuickSwitchNative.SwShowNoActivate : QuickSwitchNative.SwHide);
+
+        // 最小化的对话框即使仍处于前台也不显示栏：栏会停在最小化前的坐标上，浮在桌面。
+        var lpShow = active && !QuickSwitchNative.IsIconic(_lpDialog.Handle);
+        QuickSwitchNative.ShowWindow(_lpHandle, lpShow ? QuickSwitchNative.SwShowNoActivate : QuickSwitchNative.SwHide);
     }
 
     private void ConfigureWindow()
@@ -228,10 +244,14 @@ public sealed partial class QuickSwitchWindow : Window
             return;
         }
 
-        if (!_lpShown)
+        _lpShown = true;
+
+        // 还原时系统会把 owner 的附属窗口一并自动显示出来，所以这里要按前台状态再套用一次可见性，
+        // 而不是只在「从隐藏转为显示」时判断，否则后台对话框被还原（不激活）会把栏也带出来，
+        // 绕过「只显示前台那条」的约定。
+        if (!_lpForegroundActive)
         {
-            QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwShowNoActivate);
-            _lpShown = true;
+            QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
         }
 
         PositionAttached();
