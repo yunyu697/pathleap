@@ -835,7 +835,15 @@ public partial class App : Application
             _lpConfig.LastUpdateCheck = DateTimeOffset.Now.ToString("O");
             ThemeService.Instance.SaveConfig();
 
-            if (!lpResult.Ok || !lpResult.HasUpdate)
+            if (!lpResult.Ok)
+            {
+                // 自动检查失败不静默：日志 + 托盘提示；不谎报有更新。
+                AppLog.Warn($"自动检查更新未完成: {lpResult.Message}");
+                _lpNativeHost?.ShowTrayInfo("更新检查未完成", lpResult.Message);
+                return;
+            }
+
+            if (!lpResult.HasUpdate)
             {
                 AppLog.Info($"自动检查更新: {lpResult.Message}");
                 return;
