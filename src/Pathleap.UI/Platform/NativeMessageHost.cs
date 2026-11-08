@@ -727,7 +727,8 @@ internal sealed class NativeMessageHost : IDisposable
                 lpData.InfoTitle = title.Length > 60 ? title[..60] : title;
                 lpData.Info = message.Length > 250 ? message[..250] : message;
                 lpData.InfoFlags = warning ? NativeMethods.NiifWarning : NativeMethods.NiifInfo;
-                NativeMethods.Shell_NotifyIconW(NativeMethods.NimModify, ref lpData);
+                var lpShown = NativeMethods.Shell_NotifyIconW(NativeMethods.NimModify, ref lpData);
+                AppLog.Info($"托盘提示已提交: title=\"{lpData.InfoTitle}\" warning={warning} ok={lpShown}");
             }
         }
 
