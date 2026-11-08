@@ -7,7 +7,6 @@
 
     <Grid x:Name="RootGrid">
         <Grid.Resources>
-            <SolidColorBrush x:Key="AccentBrush" Color="#3D6EF7" />
             <Style x:Key="LpNavButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
@@ -47,13 +46,13 @@
                 <Setter Property="Foreground" Value="{ThemeResource Text2Brush}" />
             </Style>
             <Style x:Key="LpPrimaryButtonStyle" TargetType="Button">
-                <Setter Property="Background" Value="{ThemeResource Surface4Brush}" />
+                <Setter Property="Background" Value="{ThemeResource AccentBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="7" />
                 <Setter Property="Height" Value="30" />
                 <Setter Property="Padding" Value="14,0" />
                 <Setter Property="FontSize" Value="11.5" />
-                <Setter Property="Foreground" Value="#FFFFFF" />
+                <Setter Property="Foreground" Value="{ThemeResource AccentInkBrush}" />
             </Style>
             <Style x:Key="LpSelectButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
@@ -84,13 +83,29 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- 标题栏（系统按钮由 WinUI 绘制在右侧） -->
-                <Grid x:Name="CaptionBar" Grid.Row="0" Background="{ThemeResource CaptionBrush}">
+                <!-- 标题栏：左侧标题，右侧自绘按钮（最小化、关闭；固定尺寸窗不显示最大化） -->
+                <Grid x:Name="CaptionBar" Grid.Row="0" Background="{ThemeResource CaptionBrush}"
+                      PointerPressed="OnCaptionBarPressed">
                     <TextBlock Text="设置"
                                FontSize="12.5"
                                Foreground="{ThemeResource Text2Brush}"
                                Margin="16,0,0,0"
                                VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top">
+                        <controls:CaptionButton x:Name="CaptionMinButton"
+                                                Style="{StaticResource LpCaptionButtonStyle}"
+                                                Kind="Minimize"
+                                                ToolTipService.ToolTip="最小化"
+                                                Click="OnCaptionMinimizeClick" />
+                        <controls:CaptionButton x:Name="CaptionCloseButton"
+                                                Style="{StaticResource LpCaptionButtonStyle}"
+                                                Kind="Close"
+                                                IsClose="True"
+                                                ToolTipService.ToolTip="关闭"
+                                                Click="OnCaptionCloseClick" />
+                    </StackPanel>
                     <Border Height="1"
                             Background="{ThemeResource Border1Brush}"
                             VerticalAlignment="Bottom" />
@@ -122,15 +137,7 @@
                                         Width="26"
                                         Height="26"
                                         CornerRadius="8"
-                                        VerticalAlignment="Center">
-                                    <TextBlock x:Name="BrandMarkText"
-                                               Text="名"
-                                               FontSize="10"
-                                               FontWeight="Bold"
-                                               Foreground="#FFFFFF"
-                                               HorizontalAlignment="Center"
-                                               VerticalAlignment="Center" />
-                                </Border>
+                                        VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                                     <TextBlock x:Name="ProductNameText"
                                                Text="Pathleap"
@@ -345,31 +352,97 @@
                                     </Border>
                                 </Grid>
 
-                                <TextBlock Text="强调色"
+                                <TextBlock Text="配色方案"
                                            Style="{StaticResource LpSectionLabelStyle}"
-                                           Margin="0,22,0,9" />
-                                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                    <Border x:Name="AccentBlue" Width="21" Height="21" CornerRadius="11" Background="#3D6EF7" Tapped="OnAccentTapped" Tag="#3D6EF7">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                           Margin="0,22,0,3" />
+                                <TextBlock Text="一整套窗口、表面、文字、边框与状态色；与上方明暗独立组合，切换即时生效。"
+                                           FontSize="10.5"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           Margin="0,0,0,9" />
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border x:Name="ColorThemeIndigo" Style="{StaticResource LpCardStyle}" Tapped="OnColorThemeTapped" Tag="indigo">
+                                        <StackPanel>
+                                            <Border Height="34" Margin="6,6,6,0" CornerRadius="5" Background="#171A21">
+                                                <StackPanel Margin="7,6" Spacing="4">
+                                                    <Border Height="5" Width="30" CornerRadius="2" Background="#3563E6" HorizontalAlignment="Left" />
+                                                    <Border Height="4" Width="20" CornerRadius="2" Background="#A3ADBE" HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Padding="9,6,9,8">
+                                                <TextBlock Text="靛紫" FontSize="11.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <FontIcon x:Name="ColorThemeIndigoCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource AccentBrush}" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
-                                    <Border x:Name="AccentPurple" Width="21" Height="21" CornerRadius="11" Background="#7A5CFF" Tapped="OnAccentTapped" Tag="#7A5CFF">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                    <Border x:Name="ColorThemeViolet" Grid.Column="1" Style="{StaticResource LpCardStyle}" Tapped="OnColorThemeTapped" Tag="violet">
+                                        <StackPanel>
+                                            <Border Height="34" Margin="6,6,6,0" CornerRadius="5" Background="#17141F">
+                                                <StackPanel Margin="7,6" Spacing="4">
+                                                    <Border Height="5" Width="30" CornerRadius="2" Background="#6E52E8" HorizontalAlignment="Left" />
+                                                    <Border Height="4" Width="20" CornerRadius="2" Background="#AFA6C4" HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Padding="9,6,9,8">
+                                                <TextBlock Text="紫罗兰" FontSize="11.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <FontIcon x:Name="ColorThemeVioletCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource AccentBrush}" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
-                                    <Border x:Name="AccentGreen" Width="21" Height="21" CornerRadius="11" Background="#2FA27F" Tapped="OnAccentTapped" Tag="#2FA27F">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                    <Border x:Name="ColorThemeAurora" Grid.Column="2" Style="{StaticResource LpCardStyle}" Tapped="OnColorThemeTapped" Tag="aurora">
+                                        <StackPanel>
+                                            <Border Height="34" Margin="6,6,6,0" CornerRadius="5" Background="#131A20">
+                                                <StackPanel Margin="7,6" Spacing="4">
+                                                    <Border Height="5" Width="30" CornerRadius="2" Background="#35C7E4" HorizontalAlignment="Left" />
+                                                    <Border Height="4" Width="20" CornerRadius="2" Background="#9FB3BD" HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Padding="9,6,9,8">
+                                                <TextBlock Text="极光青" FontSize="11.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <FontIcon x:Name="ColorThemeAuroraCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource AccentBrush}" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
-                                    <Border x:Name="AccentAmber" Width="21" Height="21" CornerRadius="11" Background="#D98A2B" Tapped="OnAccentTapped" Tag="#D98A2B">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                    <Border x:Name="ColorThemeForest" Grid.Column="3" Style="{StaticResource LpCardStyle}" Tapped="OnColorThemeTapped" Tag="forest">
+                                        <StackPanel>
+                                            <Border Height="34" Margin="6,6,6,0" CornerRadius="5" Background="#141A17">
+                                                <StackPanel Margin="7,6" Spacing="4">
+                                                    <Border Height="5" Width="30" CornerRadius="2" Background="#3FBF8C" HorizontalAlignment="Left" />
+                                                    <Border Height="4" Width="20" CornerRadius="2" Background="#A1B3A9" HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Padding="9,6,9,8">
+                                                <TextBlock Text="森野绿" FontSize="11.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <FontIcon x:Name="ColorThemeForestCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource AccentBrush}" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
-                                    <Border x:Name="AccentRed" Width="21" Height="21" CornerRadius="11" Background="#D9536F" Tapped="OnAccentTapped" Tag="#D9536F">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="10" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+                                    <Border x:Name="ColorThemeEmber" Grid.Column="4" Style="{StaticResource LpCardStyle}" Tapped="OnColorThemeTapped" Tag="ember">
+                                        <StackPanel>
+                                            <Border Height="34" Margin="6,6,6,0" CornerRadius="5" Background="#1C1814">
+                                                <StackPanel Margin="7,6" Spacing="4">
+                                                    <Border Height="5" Width="30" CornerRadius="2" Background="#E6A24A" HorizontalAlignment="Left" />
+                                                    <Border Height="4" Width="20" CornerRadius="2" Background="#B9ADA0" HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Border>
+                                            <Grid Padding="9,6,9,8">
+                                                <TextBlock Text="暖琥珀" FontSize="11.5" Foreground="{ThemeResource Text1Brush}" />
+                                                <FontIcon x:Name="ColorThemeEmberCheck" Glyph="&#xE73E;" FontSize="10" Foreground="{ThemeResource AccentBrush}" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
-                                    <TextBlock Text="强调色会同步到选中态与高亮片段"
-                                               FontSize="10.5"
-                                               Foreground="{ThemeResource Text4Brush}"
-                                               Margin="4,0,0,0"
-                                               VerticalAlignment="Center" />
-                                </StackPanel>
+                                </Grid>
 
                                 <TextBlock Text="窗口"
                                            Style="{StaticResource LpSectionLabelStyle}"
@@ -705,14 +778,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border x:Name="VersionDot"
-                                            Width="30" Height="30" CornerRadius="8">
-                                        <TextBlock x:Name="VersionMarkText"
-                                                   FontSize="11"
-                                                   FontWeight="Bold"
-                                                   Foreground="#FFFFFF"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" />
-                                    </Border>
+                                            Width="30" Height="30" CornerRadius="8" />
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                                         <TextBlock x:Name="VersionLineText" Text="版本 1.0.1" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource Text1Brush}" />
                                         <TextBlock x:Name="VersionSubText" Text="稳定通道" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />

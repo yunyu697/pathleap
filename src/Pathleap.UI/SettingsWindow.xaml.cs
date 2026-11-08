@@ -48,18 +48,13 @@ public sealed partial class SettingsWindow : Window
         RootGrid.Loaded += (_, _) => DispatcherQueue.TryEnqueue(() => lpKeySink.Focus(FocusState.Programmatic));
 
         Title = $"设置 · {Branding.DisplayName}";
-        BrandMarkText.Text = Branding.Mark;
         ProductNameText.Text = Branding.DisplayName;
         NavVersionText.Text = $"版本 {Branding.Version}";
-        VersionMarkText.Text = Branding.Mark;
         VersionLineText.Text = $"版本 {Branding.Version}";
         BuildVersionDot();
 
         ConfigureWindow();
         ApplyTheme();
-
-        ExtendsContentIntoTitleBar = true;
-        SetTitleBar(CaptionBar);
 
         OpacitySlider.Value = _lpTheme.WindowOpacity;
         OpacityValueText.Text = $"{_lpTheme.WindowOpacity * 100:0}%";
@@ -76,7 +71,7 @@ public sealed partial class SettingsWindow : Window
 
         ThemeService.Instance.Changed += OnThemeChanged;
         UpdateNavVisuals();
-        UpdateAccentVisuals();
+        UpdateColorThemeVisuals();
         UpdateThemeCardVisuals();
         UpdateDensityVisuals();
         ShowPage("appearance");
@@ -86,25 +81,112 @@ public sealed partial class SettingsWindow : Window
     {
         if (AppWindow.Presenter is OverlappedPresenter lpPresenter)
         {
+            // 设置窗是固定尺寸窗：不可拉伸、不可最大化，切页也不会改变窗口尺寸。
+            // 最大化按钮不渲染（Windows 固定尺寸对话框的常规做法），避免留一个禁用变淡的按钮
+            // 被看成“三个标题栏按钮颜色不一致”。
             lpPresenter.IsResizable = false;
             lpPresenter.IsMaximizable = false;
             lpPresenter.IsMinimizable = true;
+            try
+            {
+                // 去掉系统标题栏与系统按钮：按钮改由 CaptionButton 自绘，避免两套按钮并存、颜色与粗细不同源。
+                lpPresenter.SetBorderAndTitleBar(false, false);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"设置窗无边框设置失败: {ex.Message}");
+            }
         }
 
         AppWindow.IsShownInSwitchers = true;
+        NcFrame.Apply(this);
+        CaptionMinButton.IsEnabled = AppWindow.Presenter is OverlappedPresenter { IsMinimizable: true };
         ResizeAndCenter(840, 640);
     }
 
+    /// <summary>自绘标题栏的最小化：交给系统 presenter，按钮可用性在 ConfigureWindow 里按 presenter 能力设置。</summary>
+    private void OnCaptionMinimizeClick(object sender, RoutedEventArgs e)
+    {
+        if (AppWindow.Presenter is OverlappedPresenter lpPresenter)
+        {
+            lpPresenter.Minimize();
+        }
+    }
+
+    private void OnCaptionCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>标题栏空白处拖动窗口；按在按钮上时不拦截，交给按钮自己处理点击。</summary>
+    private void OnCaptionBarPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        var lpSource = e.OriginalSource as DependencyObject;
+        while (lpSource is not null)
+        {
+            if (lpSource is Controls.CaptionButton)
+            {
+                return;
+            }
+
+            lpSource = VisualTreeHelper.GetParent(lpSource);
+        }
+
+        Platform.WindowChrome.BeginDrag(this);
+    }
+
+    /// <summary>
+    /// 固定 840×640 DIP，居中到“设置窗会出现的那块屏幕”的工作区：
+    /// 目标屏幕取鼠标当前所在屏幕（托盘、主窗或热键打开时用户正在那块屏上操作），
+    /// 尺寸与坐标都按该屏幕的 DPI 换算，工作区已扣掉任务栏；
+    /// 若窗口比工作区还大（小屏 + 高缩放），缩到工作区并留一圈边距，页面内容由右侧 ScrollViewer 滚动。
+    /// </summary>
     private void ResizeAndCenter(int width, int height)
     {
         try
         {
+            var lpInfo = new NativeMethods.MonitorInfo
+            {
+                Size = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.MonitorInfo>()
+            };
+
+            NativeMethods.Point lpCursor = default;
+            var lpMonitor = NativeMethods.GetCursorPos(out lpCursor)
+                ? NativeMethods.MonitorFromPoint(lpCursor, NativeMethods.MonitorDefaultToNearest)
+                : IntPtr.Zero;
+
+            var lpHasMonitor = lpMonitor != IntPtr.Zero && NativeMethods.GetMonitorInfoW(lpMonitor, ref lpInfo);
+            if (!lpHasMonitor)
+            {
+                // 取不到鼠标所在屏幕时退回主屏工作区，与旧行为一致，避免窗口跑到屏幕外。
+                var lpPrimary = DisplayArea.Primary.WorkArea;
+                lpInfo.Work = new NativeMethods.Rect
+                {
+                    Left = lpPrimary.X,
+                    Top = lpPrimary.Y,
+                    Right = lpPrimary.X + lpPrimary.Width,
+                    Bottom = lpPrimary.Y + lpPrimary.Height
+                };
+            }
+
             var lpScale = DpiUtil.Scale(this);
-            var lpWidth = (int)Math.Round(width * lpScale);
-            var lpHeight = (int)Math.Round(height * lpScale);
-            var lpWork = DisplayArea.Primary.WorkArea;
-            var lpX = lpWork.X + (lpWork.Width - lpWidth) / 2;
-            var lpY = lpWork.Y + (lpWork.Height - lpHeight) / 2;
+            uint lpDpiX = 0;
+            uint lpDpiY = 0;
+            if (lpHasMonitor &&
+                NativeMethods.GetDpiForMonitor(lpMonitor, NativeMethods.MdtEffectiveDpi, out lpDpiX, out lpDpiY) == 0 &&
+                lpDpiX > 0)
+            {
+                lpScale = lpDpiX / 96.0;
+            }
+
+            var lpWorkWidth = lpInfo.Work.Right - lpInfo.Work.Left;
+            var lpWorkHeight = lpInfo.Work.Bottom - lpInfo.Work.Top;
+            var lpMargin = (int)Math.Round(16 * lpScale);
+
+            var lpWidth = Math.Min((int)Math.Round(width * lpScale), lpWorkWidth - lpMargin * 2);
+            var lpHeight = Math.Min((int)Math.Round(height * lpScale), lpWorkHeight - lpMargin * 2);
+            lpWidth = Math.Max(lpWidth, 1);
+            lpHeight = Math.Max(lpHeight, 1);
+
+            var lpX = lpInfo.Work.Left + (lpWorkWidth - lpWidth) / 2;
+            var lpY = lpInfo.Work.Top + (lpWorkHeight - lpHeight) / 2;
             AppWindow.MoveAndResize(new RectInt32(lpX, lpY, lpWidth, lpHeight));
         }
         catch (Exception ex)
@@ -115,15 +197,9 @@ public sealed partial class SettingsWindow : Window
 
     private void BuildVersionDot()
     {
-        var lpGradient = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        lpGradient.GradientStops.Add(new GradientStop { Color = _lpTheme.Accent, Offset = 0 });
-        lpGradient.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 122, 92, 255), Offset = 1 });
-        VersionDot.Background = lpGradient;
-        BrandDot.Background = lpGradient;
+        // 界面内品牌标记用当前明暗对应的图标（系统跟随模式下由 Changed 重新套用）。
+        VersionDot.Background = _lpTheme.BrandMarkBrush;
+        BrandDot.Background = _lpTheme.BrandMarkBrush;
     }
 
     private void ApplyTheme()
@@ -131,12 +207,11 @@ public sealed partial class SettingsWindow : Window
         RootGrid.RequestedTheme = _lpTheme.ElementTheme;
         RootGrid.Background = _lpTheme.SurfaceBrush;
         Platform.WindowChrome.Apply(this, _lpTheme.WindowBorderColor, _lpTheme.IsDark);
-        RootGrid.Resources["AccentBrush"] = _lpTheme.AccentBrush;
         BuildVersionDot();
         BuildHotkeyPresets();
         UpdateNavVisuals();
         UpdateThemeCardVisuals();
-        UpdateAccentVisuals();
+        UpdateColorThemeVisuals();
         UpdateDensityVisuals();
     }
 
@@ -334,14 +409,21 @@ public sealed partial class SettingsWindow : Window
         radio.Stroke = selected ? _lpTheme.AccentBrush : _lpTheme.TrackOffBorderBrush;
     }
 
-    private void UpdateAccentVisuals()
+    private void UpdateColorThemeVisuals()
     {
-        var lpSelectedHex = $"#{_lpTheme.Accent.R:X2}{_lpTheme.Accent.G:X2}{_lpTheme.Accent.B:X2}";
-        foreach (var lpSwatch in new[] { AccentBlue, AccentPurple, AccentGreen, AccentAmber, AccentRed })
-        {
-            var lpIsSelected = string.Equals((string)lpSwatch.Tag, lpSelectedHex, StringComparison.OrdinalIgnoreCase);
-            lpSwatch.Opacity = lpIsSelected ? 1.0 : 0.45;
-        }
+        var lpSelected = _lpTheme.CurrentColorTheme.Id;
+        SetColorThemeCard(ColorThemeIndigo, ColorThemeIndigoCheck, string.Equals(lpSelected, "indigo", StringComparison.Ordinal));
+        SetColorThemeCard(ColorThemeViolet, ColorThemeVioletCheck, string.Equals(lpSelected, "violet", StringComparison.Ordinal));
+        SetColorThemeCard(ColorThemeAurora, ColorThemeAuroraCheck, string.Equals(lpSelected, "aurora", StringComparison.Ordinal));
+        SetColorThemeCard(ColorThemeForest, ColorThemeForestCheck, string.Equals(lpSelected, "forest", StringComparison.Ordinal));
+        SetColorThemeCard(ColorThemeEmber, ColorThemeEmberCheck, string.Equals(lpSelected, "ember", StringComparison.Ordinal));
+    }
+
+    private void SetColorThemeCard(Border card, FontIcon check, bool selected)
+    {
+        card.BorderBrush = selected ? _lpTheme.AccentBrush : _lpTheme.Border1Brush;
+        card.Opacity = selected ? 1.0 : 0.72;
+        check.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateDensityVisuals()
@@ -409,19 +491,12 @@ public sealed partial class SettingsWindow : Window
         _lpTheme.SetMode(LpThemeMode.System);
     }
 
-    private void OnAccentTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    private void OnColorThemeTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
-        if (sender is not Border lpSwatch || lpSwatch.Tag is not string lpHex || lpHex.Length != 7)
+        if (sender is Border lpCard && lpCard.Tag is string lpId)
         {
-            return;
+            _lpTheme.SetColorTheme(lpId);
         }
-
-        var lpColor = Color.FromArgb(
-            255,
-            Convert.ToByte(lpHex.Substring(1, 2), 16),
-            Convert.ToByte(lpHex.Substring(3, 2), 16),
-            Convert.ToByte(lpHex.Substring(5, 2), 16));
-        _lpTheme.SetAccent(lpColor);
     }
 
     private void OnOpacityChanged(object? sender, EventArgs e)
