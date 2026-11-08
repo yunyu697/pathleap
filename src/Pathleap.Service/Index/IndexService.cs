@@ -24,6 +24,14 @@ internal sealed class IndexService : IDisposable
 
     public bool Building => Volatile.Read(ref _lpBuildFlag) == 1;
 
+    /// <summary>最近一次构建使用的根与模式，运行期自动刷新沿用同样的范围。</summary>
+    public string LastBuildRoot { get; private set; } = string.Empty;
+
+    public string LastBuildMode { get; private set; } = "auto";
+
+    /// <summary>每次构建结束（成功/失败/取消）触发，供运行期监视器重挂 USN 读取起点。</summary>
+    public event Action? BuildFinished;
+
     public IndexStatusDto Status
     {
         get
@@ -171,6 +179,7 @@ internal sealed class IndexService : IDisposable
         finally
         {
             Volatile.Write(ref _lpBuildFlag, 0);
+            RaiseBuildFinished();
         }
     }
 
@@ -194,8 +203,21 @@ internal sealed class IndexService : IDisposable
             finally
             {
                 Volatile.Write(ref _lpBuildFlag, 0);
+                RaiseBuildFinished();
             }
         });
+    }
+
+    private void RaiseBuildFinished()
+    {
+        try
+        {
+            BuildFinished?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"构建完成回调失败: {ex.Message}");
+        }
     }
 
     private void BeginBuild()
@@ -230,6 +252,8 @@ internal sealed class IndexService : IDisposable
         {
             var lpMode = string.IsNullOrWhiteSpace(mode) ? "auto" : mode.Trim().ToLowerInvariant();
             var lpRoot = string.IsNullOrWhiteSpace(root) ? @"C:\" : root.Trim();
+            LastBuildRoot = lpRoot;
+            LastBuildMode = lpMode;
             var lpVolumeLabel = IndexBuildRunner.ResolveVolumeLabel(
                 lpMode == "synthetic" ? "C:\\" : lpRoot);
             lpOutput = AppPaths.IndexFile(lpVolumeLabel);

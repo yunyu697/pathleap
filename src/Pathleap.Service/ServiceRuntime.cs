@@ -1,5 +1,6 @@
 using Pathleap.Shared;
 using Pathleap.Shared.Diagnostics;
+using Pathleap.Shared.Index;
 using Pathleap.Shared.Ipc;
 using Pathleap.Service.Index;
 
@@ -15,12 +16,20 @@ public sealed class ServiceRuntime : IDisposable
     /// <summary>索引超过这个天数就视为过期，启动时自动重扫。</summary>
     private const int IndexRefreshDays = 7;
 
+    /// <summary>USN 变更安静这么久才重建，避免安装/编译的连续写入反复触发。</summary>
+    private static readonly TimeSpan JournalQuietPeriod = TimeSpan.FromSeconds(60);
+
+    /// <summary>两次自动重建之间至少间隔这么久，给查询留出稳定窗口。</summary>
+    private static readonly TimeSpan JournalMinInterval = TimeSpan.FromMinutes(15);
+
     private readonly string _lpMode;
     private readonly DateTimeOffset _lpStartedAt = DateTimeOffset.Now;
     private readonly CancellationTokenSource _lpCts = new();
     private readonly IndexService _lpIndex = new();
     private Task? _lpPipeTask;
     private Task? _lpAutoBuildTask;
+    private UsnJournalWatcher? _lpWatcher;
+    private CancellationTokenSource? _lpWatchCts;
 
     public ServiceRuntime(string mode)
     {
@@ -42,6 +51,9 @@ public sealed class ServiceRuntime : IDisposable
 
         // 不阻塞管道启动：先让 UI 能连上并读到「构建中 + 进度」，构建在后台自行推进。
         _lpAutoBuildTask = Task.Run(() => AutoBuildIfNeeded(_lpCts.Token));
+
+        _lpIndex.BuildFinished += StartJournalWatchIfUsn;
+        StartJournalWatchIfUsn();
 
         _lpPipeTask = PipeServer.RunAsync(Branding.ServicePipeName, HandleRequestAsync, _lpCts.Token);
     }
@@ -79,9 +91,139 @@ public sealed class ServiceRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// 只有在索引来源是 USN 时才启用运行期自动刷新：USN 日志告诉我们「有变化」，
+    /// 安静 60 秒后自动重建（不是逐条打补丁，索引格式仍是一次性快照）。
+    /// 目录遍历模式、拿不到卷句柄（非管理员）都明确记日志，运行期变更仍需手动重建。
+    /// </summary>
+    private void StartJournalWatchIfUsn()
+    {
+        try
+        {
+            StopJournalWatch();
+            var lpStatus = _lpIndex.Status;
+            if (!lpStatus.Loaded)
+            {
+                return;
+            }
+
+            if (!lpStatus.Source.StartsWith("usn:", StringComparison.OrdinalIgnoreCase))
+            {
+                AppLog.Info($"运行期自动刷新未启用：当前索引来源为 {lpStatus.Source}，运行期变更需手动「重建索引」");
+                return;
+            }
+
+            var lpRoot = string.IsNullOrEmpty(_lpIndex.LastBuildRoot) ? @"C:\" : _lpIndex.LastBuildRoot;
+            var lpWatcher = new UsnJournalWatcher(lpRoot);
+            if (!lpWatcher.TryStart())
+            {
+                AppLog.Warn($"运行期自动刷新未启用：{lpWatcher.Error}；运行期变更仍需手动「重建索引」");
+                lpWatcher.Dispose();
+                return;
+            }
+
+            var lpCts = CancellationTokenSource.CreateLinkedTokenSource(_lpCts.Token);
+            var lpCoalescer = new ChangeCoalescer(
+                JournalQuietPeriod,
+                JournalMinInterval,
+                lpStatus.BuiltAt ?? DateTimeOffset.Now);
+            _lpWatcher = lpWatcher;
+            _lpWatchCts = lpCts;
+            _ = Task.Run(() => JournalLoop(lpWatcher, lpCoalescer, lpCts.Token));
+            AppLog.Info(
+                $"运行期自动刷新已启用：安静 {JournalQuietPeriod.TotalSeconds:0}s 后重建，最小间隔 {JournalMinInterval.TotalMinutes:0} 分钟");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"启动运行期自动刷新失败: {ex.Message}");
+        }
+    }
+
+    private void JournalLoop(UsnJournalWatcher watcher, ChangeCoalescer coalescer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var lpChanges = watcher.Poll(2000);
+                if (lpChanges < 0)
+                {
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        AppLog.Warn($"运行期自动刷新停止：{watcher.Error}");
+                    }
+
+                    return;
+                }
+
+                var lpNow = DateTimeOffset.Now;
+                if (lpChanges > 0)
+                {
+                    coalescer.Notify(lpChanges, lpNow);
+                    AppLog.Debug($"USN 变更 +{lpChanges} 条，待刷新累计 {coalescer.Pending}");
+                }
+
+                if (_lpIndex.Building || !coalescer.ShouldRebuild(lpNow))
+                {
+                    continue;
+                }
+
+                var lpPending = coalescer.MarkRebuilt(lpNow);
+                AppLog.Info($"USN 累计 {lpPending:N0} 条变更且已安静 {JournalQuietPeriod.TotalSeconds:0}s，自动重建索引");
+                try
+                {
+                    _ = _lpIndex.StartBuildAsync(_lpIndex.LastBuildRoot, _lpIndex.LastBuildMode, _lpCts.Token)
+                        .ContinueWith(static task =>
+                        {
+                            if (task.IsFaulted)
+                            {
+                                AppLog.Warn($"自动重建失败：{task.Exception?.GetBaseException().Message}");
+                            }
+                        }, TaskScheduler.Default);
+                }
+                catch (InvalidOperationException)
+                {
+                    // 已有构建在进行，交给 BuildFinished 重挂后再判断。
+                }
+
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                AppLog.Error("USN 监视循环异常", ex);
+            }
+        }
+    }
+
+    private void StopJournalWatch()
+    {
+        var lpCts = _lpWatchCts;
+        _lpWatchCts = null;
+        if (lpCts is not null)
+        {
+            try
+            {
+                lpCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // 已在关闭流程中。
+            }
+
+            lpCts.Dispose();
+        }
+
+        _lpWatcher?.Dispose();
+        _lpWatcher = null;
+    }
+
     public void Stop()
     {
         AppLog.Info("服务停止中…");
+        StopJournalWatch();
         _lpCts.Cancel();
         try
         {

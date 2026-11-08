@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Pathleap.Shared;
+using Pathleap.Shared.Index;
 using Pathleap.Shared.Ipc;
 using Pathleap.Shared.Update;
 
@@ -385,6 +386,20 @@ internal static class Program
         var lpTamperedNotes = LatestManifest.Parse(lpJson);
         lpTamperedNotes.Notes += "tampered";
         Check("清单篡改说明验签失败", !ReleaseSigning.Verify(lpTamperedNotes, ReleaseSigning.GetPublicKeyBase64(lpRandomSeed)));
+
+        // 运行期变更合并：安静期 + 最小重建间隔。
+        var lpNow = DateTimeOffset.UtcNow;
+        var lpCoalescer = new ChangeCoalescer(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), lpNow.AddSeconds(-10));
+        lpCoalescer.Notify(10, lpNow);
+        Check("变更未过安静期不触发重建", !lpCoalescer.ShouldRebuild(lpNow.AddMilliseconds(500)));
+        Check("变更过安静期且满足间隔后触发重建", lpCoalescer.ShouldRebuild(lpNow.AddSeconds(1.2)));
+        var lpBatched = lpCoalescer.MarkRebuilt(lpNow.AddSeconds(1.2));
+        Check("重建后合并计数归零", lpBatched == 10 && lpCoalescer.Pending == 0);
+        lpCoalescer.Notify(3, lpNow.AddSeconds(2));
+        Check("距上次重建不足最小间隔时继续等待", !lpCoalescer.ShouldRebuild(lpNow.AddSeconds(2.5)));
+        Check("安静期与最小间隔都满足时才放行", lpCoalescer.ShouldRebuild(lpNow.AddSeconds(8)));
+        lpCoalescer.Notify(1, lpNow.AddSeconds(9));
+        Check("新变更会重置安静期", !lpCoalescer.ShouldRebuild(lpNow.AddSeconds(9.4)));
 
         Console.WriteLine(lpFailures == 0 ? "自检全部通过" : $"自检失败 {lpFailures} 项");
         return lpFailures == 0 ? 0 : 1;

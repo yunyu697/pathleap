@@ -10,6 +10,21 @@ internal static class Program
     {
         AppLog.Initialize("service");
 
+        // 运行期监视探针：--usn-watch-probe，验证卷句柄权限与一次读取，不常驻。
+        if (Array.Exists(args, static a => string.Equals(a, "--usn-watch-probe", StringComparison.OrdinalIgnoreCase)))
+        {
+            using var lpWatcher = new UsnJournalWatcher(@"C:\");
+            if (!lpWatcher.TryStart())
+            {
+                Console.WriteLine($"start=false error={lpWatcher.Error}");
+                return 5;
+            }
+
+            var lpChanges = lpWatcher.Poll(1000);
+            Console.WriteLine($"start=true changes={lpChanges}");
+            return lpChanges < 0 ? 6 : 0;
+        }
+
         // 构建子进程入口：--build-once <mode> <root> <output>，跑完即退出，不走单实例互斥。
         var lpBuildOnce = Array.FindIndex(args, static a => string.Equals(a, "--build-once", StringComparison.OrdinalIgnoreCase));
         if (lpBuildOnce >= 0)
