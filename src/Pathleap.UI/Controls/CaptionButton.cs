@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Pathleap.UI.Theme;
@@ -73,21 +74,23 @@ public sealed class CaptionButton : Button
             _lpPressed = false;
             ApplyColors();
         };
-        PointerPressed += (_, _) =>
+        // Button 基类会处理并吞掉 PointerPressed/Released（默认处理器收不到 handled 事件），
+        // 因此按下态必须用 handledEventsToo=true 注册，否则按钮永远只显示悬停色。
+        AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) =>
         {
             _lpPressed = true;
             ApplyColors();
-        };
-        PointerReleased += (_, _) =>
+        }), true);
+        AddHandler(PointerReleasedEvent, new PointerEventHandler((_, _) =>
         {
             _lpPressed = false;
             ApplyColors();
-        };
-        PointerCaptureLost += (_, _) =>
+        }), true);
+        AddHandler(PointerCaptureLostEvent, new PointerEventHandler((_, _) =>
         {
             _lpPressed = false;
             ApplyColors();
-        };
+        }), true);
 
         ApplyGlyph();
         ApplyColors();
