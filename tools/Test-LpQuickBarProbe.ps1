@@ -181,7 +181,7 @@ Start-Sleep -Seconds 5
 
 # ---------- 宿主对话框 1 ----------
 $LpHost1 = Start-Process -FilePath $LpHost -ArgumentList @('打开（Pathleap 验收）') -PassThru
-$LpDlg1 = Wait-LpWindow -LpWhat '文件对话框 1' -LpMatch { param($w) $w.Class -eq '#32770' -and $w.Pid -eq $LpHost1.Id }
+$LpDlg1 = Wait-LpWindow -LpWhat '文件对话框 1' -LpMatch { param($LpWin) $LpWin.Class -eq '#32770' -and $LpWin.Pid -eq $LpHost1.Id }
 Set-LpForeground $LpDlg1
 Start-Sleep -Milliseconds 1500
 $LpBar1 = Find-LpBarFor -LpDialog $LpDlg1
@@ -197,7 +197,7 @@ Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-
 Write-Lp ''
 Write-Lp '--- [2] 另一个窗口盖住对话框与栏（遮挡窗插到对话框正上方）---'
 $LpCover = Start-Process -FilePath $LpHost -ArgumentList @('cover') -PassThru
-$LpCoverH = Wait-LpWindow -LpWhat '遮挡窗口' -LpMatch { param($w) $w.Title -eq '遮挡测试' }
+$LpCoverH = Wait-LpWindow -LpWhat '遮挡窗口' -LpMatch { param($LpWin) $LpWin.Title -eq '遮挡测试' }
 # 遮挡窗显示时会自己激活到最前，等价于用户切到别的应用窗口。
 Start-Sleep -Milliseconds 1500
 $LpBarRect = Get-LpBounds $LpBar1
@@ -248,7 +248,7 @@ Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-
 Write-Lp ''
 Write-Lp '--- [8] 第二个对话框：各自跟自己的宿主 ---'
 $LpHost2 = Start-Process -FilePath $LpHost -ArgumentList @('打开（Pathleap 验收 2）') -PassThru
-$LpDlg2 = Wait-LpWindow -LpWhat '文件对话框 2' -LpMatch { param($w) $w.Class -eq '#32770' -and $w.Pid -eq $LpHost2.Id }
+$LpDlg2 = Wait-LpWindow -LpWhat '文件对话框 2' -LpMatch { param($LpWin) $LpWin.Class -eq '#32770' -and $LpWin.Pid -eq $LpHost2.Id }
 Set-LpForeground $LpDlg2
 Start-Sleep -Milliseconds 1500
 $LpBar2 = Find-LpBarFor -LpDialog $LpDlg2
