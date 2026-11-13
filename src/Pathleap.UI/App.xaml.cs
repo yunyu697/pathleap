@@ -661,6 +661,17 @@ public partial class App : Application
             PruneDeadBars();
             SyncBarVisibility(handle);
             UpdateKeyboardBarForForeground(handle);
+            // 宿主回到前台时系统会把 owned 栏抬到宿主之上，这里立刻压回宿主之下，
+            // 保证栏始终与对话框同层，不会越过盖住对话框的其它窗口。
+            foreach (var lpBar in _lpQuickBars.Values)
+            {
+                if (lpBar.OwnerHandle == handle)
+                {
+                    lpBar.ReorderBelowOwner();
+                    lpBar.ReorderBelowOwnerDelayed();
+                    break;
+                }
+            }
         };
 
         // 启动前已经打开的文件对话框也要补上栏。

@@ -371,6 +371,8 @@ public sealed partial class QuickSwitchWindow : Window
         ShowIfNeeded();
         StartFollowBurst();
         PositionAttached();
+        // 还原/重新贴边后系统还会把 owned 窗口再抬一次，补两次延后重排压回宿主之下。
+        ReorderBelowOwnerDelayed();
     }
 
     /// <summary>
@@ -556,7 +558,7 @@ public sealed partial class QuickSwitchWindow : Window
     }
 
     /// <summary>把栏放到 owner（对话框/主窗）之后，保证只在它上方一层，不盖到别的应用。</summary>
-    private void BringToFront()
+    private void BringToFront(bool show = true)
     {
         if (_lpOwner == IntPtr.Zero)
         {
@@ -571,9 +573,32 @@ public sealed partial class QuickSwitchWindow : Window
             0,
             0,
             QuickSwitchNative.SwpNoActivate
-            | QuickSwitchNative.SwpShowWindow
+            | (show ? QuickSwitchNative.SwpShowWindow : 0)
             | 0x0001 /* SWP_NOSIZE */
             | 0x0002 /* SWP_NOMOVE */);
+    }
+
+    /// <summary>栏当前绑定的宿主窗口；未挂到对话框时为 0。</summary>
+    internal IntPtr OwnerHandle => _lpOwner;
+
+    /// <summary>
+    /// 宿主被激活时系统会把 owned 窗口抬到宿主之上，导致栏越过盖住对话框的其它窗口。
+    /// 前台一变就重新插回宿主之下，保证栏和对话框始终同一层。
+    /// 这里不能带 SWP_SHOWWINDOW，否则会把宿主最小化时刚藏起来的栏又显示出来。
+    /// </summary>
+    internal void ReorderBelowOwner() => BringToFront(false);
+
+    /// <summary>
+    /// 系统在激活宿主后还会再抬一次 owned 窗口，紧接着的 SetWindowPos 会被它覆盖。
+    /// 再补一次 150ms 后的重排，确保最小化还原、切回宿主等路径也稳定落在宿主之下。
+    /// </summary>
+    internal void ReorderBelowOwnerDelayed()
+    {
+        foreach (var lpDelay in new[] { 150, 700 })
+        {
+            _ = Task.Delay(lpDelay).ContinueWith(_ =>
+                DispatcherQueue.TryEnqueue(() => BringToFront(false)));
+        }
     }
 
     public void SetKeyboardActive(bool active)
