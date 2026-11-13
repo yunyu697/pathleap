@@ -9,20 +9,26 @@ namespace Pathleap.UI.Platform;
 /// WinUI 3 的 OverlappedPresenter 关掉标题栏后，DWM 仍会在窗口最外圈按 DPI 画一圈 1 DIP 的边框
 /// （200% 缩放下是 2 物理像素）。这一圈无法用 XAML 覆盖，若再用 RootBorder 自绘描边，
 /// 就会出现「系统框 + 自绘框」两层，正是实测反馈的双层边框。
-/// 因此这里把 DWM 边框直接设成设计稿 Border2 的实色，让系统框成为唯一的一层；
-/// 圆角交给 <see cref="NcFrame"/> 的窗口区域裁剪，DWM 侧关闭系统圆角以免两种半径打架。
+/// 因此这里把 DWM 边框直接设成设计稿 Border2 的实色，让系统框成为唯一的一层。
+/// DWM 圆角默认打开；快速切换栏要贴着对话框下边缘，圆角会让四角露出后面的像素（实测就是「角上白边」），
+/// 所以它必须传 <see cref="CornerDoNotRound"/> 并把客户区整块填满。
 /// </summary>
 internal static class WindowChrome
 {
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaWindowCornerPreference = 33;
     private const int DwmwaBorderColor = 34;
-    private const uint DwmwcpRound = 2;
+
+    /// <summary>DWMWCP_ROUND：系统按 DIP 画圆角，四角像素被裁掉，露出后面的内容。</summary>
+    public const uint CornerRound = 2;
+
+    /// <summary>DWMWCP_DONOTROUND：不裁角，窗口矩形四角完整保留，客户区画什么就是什么。</summary>
+    public const uint CornerDoNotRound = 1;
 
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref uint value, int size);
 
-    public static void Apply(Window window, Color border, bool isDark)
+    public static void Apply(Window window, Color border, bool isDark, uint corner = CornerRound)
     {
         try
         {
@@ -32,7 +38,7 @@ internal static class WindowChrome
             var lpDark = isDark ? 1u : 0u;
             DwmSetWindowAttribute(lpHwnd, DwmwaUseImmersiveDarkMode, ref lpDark, sizeof(uint));
 
-            var lpCorner = DwmwcpRound;
+            var lpCorner = corner;
             DwmSetWindowAttribute(lpHwnd, DwmwaWindowCornerPreference, ref lpCorner, sizeof(uint));
 
             // DWMWA_BORDER_COLOR 取 COLORREF：0x00BBGGRR，无 alpha。
