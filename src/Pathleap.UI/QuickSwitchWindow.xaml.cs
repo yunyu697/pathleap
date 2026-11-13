@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
 using Pathleap.Shared.Config;
@@ -56,6 +57,7 @@ public sealed partial class QuickSwitchWindow : Window
     private bool _lpSearching;
     private int _lpSearchGeneration;
     private string _lpBodyKey = string.Empty;
+    private bool _lpGuideDismissed;
     private DateTimeOffset _lpFollowUntil;
     private int _lpLastX = int.MinValue;
     private int _lpLastY = int.MinValue;
@@ -236,43 +238,60 @@ public sealed partial class QuickSwitchWindow : Window
             ThemeService.Instance.IsDark);
 
         BrandDot.Background = ThemeService.Instance.BrandMarkBrush;
-        TitleText.Foreground = ThemeService.Instance.Text1Brush;
-        SubtitleText.Foreground = ThemeService.Instance.Text3Brush;
         CountText.Foreground = ThemeService.Instance.Text3Brush;
-        ModeHintText.Foreground = ThemeService.Instance.Text3Brush;
-        HintChip.Background = ThemeService.Instance.TrackOffBrush;
-        HintChip.BorderBrush = ThemeService.Instance.TrackOffBorderBrush;
 
-        SearchBox.Background = ThemeService.Instance.Surface2Brush;
-        SearchBox.BorderBrush = ThemeService.Instance.Border2Brush;
         SearchBox.Foreground = ThemeService.Instance.Text1Brush;
-        SearchBox.PlaceholderForeground = ThemeService.Instance.Text3Brush;
+        SearchBox.PlaceholderForeground = ThemeService.Instance.Text4Brush;
         EmptyText.Foreground = ThemeService.Instance.Text3Brush;
+
+        GuideStep1Text.Foreground = ThemeService.Instance.Text1Brush;
+        GuideStep2Text.Foreground = ThemeService.Instance.Text1Brush;
+        GuideStep3Text.Foreground = ThemeService.Instance.Text1Brush;
+        var lpGuideDot = ThemeService.Instance.AccentBrush;
+        GuideStep1Dot.Background = lpGuideDot;
+        GuideStep2Dot.Background = lpGuideDot;
+        GuideStep3Dot.Background = lpGuideDot;
+        GuideSkip.BorderBrush = ThemeService.Instance.TrackOffBorderBrush;
+        GuideSkip.Background = ThemeService.Instance.TrackOffBrush;
+        GuideSkipText.Foreground = ThemeService.Instance.Text3Brush;
 
         // 文件夹卡片与结果行是在代码里建的一次性控件，配色变了要重建才能换掉已写入的画刷实例。
         _lpBodyKey = string.Empty;
         RefreshBody();
     }
 
-    private void UpdateChrome()
+    /// <summary>首次使用引导：只在没有搜索输入、且设置里还没标记看过时占内容区。</summary>
+    private bool _lpGuideVisible => !_lpGuideDismissed && !_lpSearchMode && !ThemeService.Instance.OnboardingDone;
+
+    /// <summary>引导看过后写入设置，之后主窗与 QS 栏都不再出现；重置设置或重装后重新出现。</summary>
+    private void DismissGuide()
     {
-        if (_lpDetached)
+        if (!_lpGuideVisible)
         {
-            SubtitleText.Text = "未检测到文件对话框 · 选中后在资源管理器打开";
-        }
-        else if (_lpDialog.IsFileDialog)
-        {
-            SubtitleText.Text = $"对话框：{_lpDialog.Kind} · 选中后注入路径";
-        }
-        else
-        {
-            SubtitleText.Text = "未检测到文件对话框";
+            return;
         }
 
+        _lpGuideDismissed = true;
+        ThemeService.Instance.MarkOnboardingDone();
+        RefreshBody(true);
+        PositionAfterModeChange();
+        AppLog.Info("快速切换栏首次引导已关闭");
+    }
+
+    private void OnGuideSkipTapped(object sender, TappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        DismissGuide();
+    }
+
+    /// <summary>自动化用：走一次与「跳过」完全相同的关闭路径。</summary>
+    internal void DismissGuideForTest() => DismissGuide();
+
+    private void UpdateChrome()
+    {
         CountText.Text = _lpSearchMode
             ? (_lpSearching ? "搜索中…" : $"{_lpResults.Count} 个结果")
             : $"{_lpFolders.Count} 个文件夹";
-        ModeHintText.Text = _lpKeyboardActive ? "↑↓ · ↵ · Esc" : "Ctrl+G 搜索";
         ApplyTheme();
     }
 
@@ -469,8 +488,9 @@ public sealed partial class QuickSwitchWindow : Window
                 lpMonitorInfo.Work,
                 lpHasWork,
                 _lpScale,
-                _lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count,
-                _lpSearchMode);
+                _lpGuideVisible ? 0 : (_lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count),
+                _lpSearchMode,
+                _lpGuideVisible);
 
             _lpBarWidthPx = lpBar.Width;
             _lpBarHeightPx = lpBar.Height;
@@ -518,8 +538,9 @@ public sealed partial class QuickSwitchWindow : Window
             var lpHeight = QuickSwitchLayout.Height(
                 lpWidth,
                 _lpScale,
-                _lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count,
-                _lpSearchMode);
+                _lpGuideVisible ? 0 : (_lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count),
+                _lpSearchMode,
+                _lpGuideVisible);
             _lpBarWidthPx = lpWidth;
             _lpBarHeightPx = lpHeight;
             ReflowChips(lpWidth);
@@ -676,40 +697,100 @@ public sealed partial class QuickSwitchWindow : Window
             EnterInputMode();
         }
 
+        var lpTyped = 0;
         foreach (var lpChar in text)
         {
-            var lpScan = VkKeyScanW(lpChar);
-            if (lpScan == -1)
+            // 每个字符前确认栏仍是前台：首次激活后 IDE 可能又抢回焦点，按键会路由到别处。
+            // 重新激活时不能 SelectAll，否则每敲一个字符都会替换掉前一个字符。
+            if (QuickSwitchNative.GetForegroundWindow() != _lpHandle)
             {
-                AppLog.Warn($"测试键入跳过无法映射的字符: {lpChar}");
-                continue;
+                ActivateForInput(false);
+                Thread.Sleep(80);
             }
 
-            var lpVirtual = (byte)(lpScan & 0xFF);
-            var lpShift = (lpScan & 0x0100) != 0;
-            if (lpShift)
+            if (QuickSwitchNative.GetForegroundWindow() != _lpHandle)
             {
-                keybd_event(0x10, 0, 0, UIntPtr.Zero);
+                // 前台上不来时绝不发按键，避免把字敲进别的应用。
+                AppLog.Warn($"快速切换栏测试键入中止: 第 {lpTyped + 1} 个字符前栏未取得前台");
+                break;
             }
 
-            keybd_event(lpVirtual, 0, 0, UIntPtr.Zero);
-            keybd_event(lpVirtual, 0, 2, UIntPtr.Zero);
-            if (lpShift)
-            {
-                keybd_event(0x10, 0, 2, UIntPtr.Zero);
-            }
-
-            Thread.Sleep(45);
+            SendUnicodeChar(lpChar);
+            lpTyped++;
+            Thread.Sleep(60);
         }
 
-        AppLog.Info($"快速切换栏测试键入完成: 目标={text} 实际={SearchBox.Text}");
+        Thread.Sleep(120);
+        AppLog.Info($"快速切换栏测试键入完成: 目标={text} 已投递={lpTyped} 实际={SearchBox.Text}");
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern short VkKeyScanW(char ch);
+    /// <summary>截图/自动化用：只把焦点放进搜索框，不输入内容。</summary>
+    public void FocusForTest()
+    {
+        EnterInputMode();
+    }
 
-    [DllImport("user32.dll")]
-    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    /// <summary>以 KEYEVENTF_UNICODE 投递一个字符，绕过输入法组合态，但仍是系统级按键输入。</summary>
+    private static void SendUnicodeChar(char lpChar)
+    {
+        var lpDown = new Input { Type = InputKeyboard };
+        lpDown.Data.Keyboard = new KeyboardInput
+        {
+            VirtualKey = 0,
+            ScanCode = lpChar,
+            Flags = KeyEventUnicode
+        };
+        var lpUp = new Input { Type = InputKeyboard };
+        lpUp.Data.Keyboard = new KeyboardInput
+        {
+            VirtualKey = 0,
+            ScanCode = lpChar,
+            Flags = KeyEventUnicode | KeyEventKeyUp
+        };
+        SendInput(2, new[] { lpDown, lpUp }, Marshal.SizeOf<Input>());
+    }
+
+    private const uint InputKeyboard = 1;
+    private const uint KeyEventKeyUp = 0x0002;
+    private const uint KeyEventUnicode = 0x0004;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Input
+    {
+        public uint Type;
+        public InputUnion Data;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputUnion
+    {
+        [FieldOffset(0)] public KeyboardInput Keyboard;
+        [FieldOffset(0)] public MouseInput Mouse;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public IntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput
+    {
+        public int Dx;
+        public int Dy;
+        public uint MouseData;
+        public uint Flags;
+        public uint Time;
+        public IntPtr ExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, Input[] inputs, int size);
 
     /// <summary>退出键盘模式，栏继续吸附在对话框上；焦点交还对话框。</summary>
     public void ExitKeyboardMode()
@@ -863,7 +944,7 @@ public sealed partial class QuickSwitchWindow : Window
         }
     }
 
-    private void ActivateForInput()
+    private void ActivateForInput(bool selectAll = true)
     {
         try
         {
@@ -892,10 +973,20 @@ public sealed partial class QuickSwitchWindow : Window
                     QuickSwitchNative.AttachThreadInput(lpCurrent, lpForegroundThread, false);
                 }
             }
+
+            if (QuickSwitchNative.GetForegroundWindow() != _lpHandle)
+            {
+                AppLog.Warn($"快速切换栏未能取得前台: 原前台=0x{lpForeground.ToInt64():X}, " +
+                            $"attach={lpAttached}, 现前台=0x{QuickSwitchNative.GetForegroundWindow().ToInt64():X}");
+            }
         }
 
         SearchBox.Focus(FocusState.Programmatic);
-        SearchBox.SelectAll();
+        if (selectAll)
+        {
+            SearchBox.SelectAll();
+        }
+
         AppLog.Info($"快速切换栏进入输入模式: foreground=0x{QuickSwitchNative.GetForegroundWindow().ToInt64():X}");
     }
 
@@ -933,7 +1024,15 @@ public sealed partial class QuickSwitchWindow : Window
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
     {
         var lpQuery = SearchBox.Text.Trim();
+        var lpWasGuide = _lpGuideVisible;
         _lpSearchMode = lpQuery.Length > 0;
+        if (lpWasGuide && _lpSearchMode)
+        {
+            // 开始输入即视为看过引导：立刻落盘，下次唤起不再出现。
+            _lpGuideDismissed = true;
+            ThemeService.Instance.MarkOnboardingDone();
+        }
+
         _lpSearchGeneration++;
         _lpResultSelected = -1;
 
@@ -1130,13 +1229,25 @@ public sealed partial class QuickSwitchWindow : Window
             _lpSelected,
             _lpResultSelected,
             _lpKeyboardActive ? 1 : 0,
-            _lpSearching ? 1 : 0);
+            _lpSearching ? 1 : 0,
+            _lpGuideVisible ? 1 : 0);
         if (!force && lpKey == _lpBodyKey)
         {
             return;
         }
 
         _lpBodyKey = lpKey;
+
+        if (_lpGuideVisible)
+        {
+            ChipsPanel.Visibility = Visibility.Collapsed;
+            ResultsPanel.Visibility = Visibility.Collapsed;
+            EmptyText.Visibility = Visibility.Collapsed;
+            GuidePanel.Visibility = Visibility.Visible;
+            return;
+        }
+
+        GuidePanel.Visibility = Visibility.Collapsed;
 
         if (_lpSearchMode)
         {

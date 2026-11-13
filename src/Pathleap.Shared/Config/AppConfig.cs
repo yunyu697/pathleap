@@ -59,6 +59,9 @@ public sealed class AppConfig
     /// <summary>启动时自动检查更新（只做一次 HTTP 查询，不下载）。</summary>
     public bool AutoCheckUpdates { get; set; } = true;
 
+    /// <summary>首次使用引导是否已经看过；false 时首次打开主窗或快速切换栏会显示三步引导。</summary>
+    public bool OnboardingDone { get; set; }
+
     /// <summary>更新通道：stable / preview（preview 未接入，界面会标注）。</summary>
     public string UpdateChannel { get; set; } = "stable";
 

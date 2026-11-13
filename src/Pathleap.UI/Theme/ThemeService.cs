@@ -280,6 +280,21 @@ public sealed class ThemeService
         }
     }
 
+    /// <summary>首次使用引导是否已经看过（持久化在 ui 配置里）。</summary>
+    public bool OnboardingDone => _lpConfig.OnboardingDone;
+
+    /// <summary>把首次引导标记为已看过并立即落盘，之后主窗与 QS 栏都不再显示。</summary>
+    public void MarkOnboardingDone()
+    {
+        if (_lpConfig.OnboardingDone)
+        {
+            return;
+        }
+
+        _lpConfig.OnboardingDone = true;
+        SaveConfig();
+    }
+
     private void SaveIfPersist(bool persist)
     {
         if (persist)

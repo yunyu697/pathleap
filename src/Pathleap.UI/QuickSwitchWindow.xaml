@@ -7,73 +7,58 @@
     <Border x:Name="RootBorder"
             CornerRadius="10"
             BorderThickness="0">
-        <Grid Padding="12,7,12,8" RowSpacing="5">
+        <Grid Padding="12,9,12,9" RowSpacing="6">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" ColumnSpacing="8">
+            <!-- 一行到底：品牌点 + 裸输入框 + 结果计数。不再有常驻标题/说明/快捷键提示。 -->
+            <Grid Grid.Row="0" ColumnSpacing="10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <Border x:Name="BrandDot"
-                        Width="20"
-                        Height="20"
+                        Width="18"
+                        Height="18"
                         CornerRadius="5"
                         VerticalAlignment="Center" />
 
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="6"
-                            VerticalAlignment="Center">
-                    <TextBlock x:Name="TitleText"
-                               Text="快速切换"
-                               FontSize="11.5"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center" />
-                    <TextBlock x:Name="SubtitleText"
-                               FontSize="9.5"
-                               TextTrimming="CharacterEllipsis"
-                               MaxLines="1"
-                               VerticalAlignment="Center" />
-                </StackPanel>
+                <TextBox x:Name="SearchBox"
+                         Grid.Column="1"
+                         Height="26"
+                         MinHeight="0"
+                         Padding="0"
+                         FontSize="14"
+                         FontWeight="SemiBold"
+                         VerticalContentAlignment="Center"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         PlaceholderText="搜索文件与文件夹"
+                         SelectionHighlightColor="#4D3D6EF7"
+                         IsSpellCheckEnabled="False"
+                         IsTextPredictionEnabled="False">
+                    <TextBox.Resources>
+                        <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                        <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                    </TextBox.Resources>
+                </TextBox>
 
                 <TextBlock x:Name="CountText"
                            Grid.Column="2"
                            FontSize="9.5"
                            VerticalAlignment="Center" />
-
-                <Border x:Name="HintChip"
-                        Grid.Column="3"
-                        Padding="7,2,7,2"
-                        CornerRadius="8"
-                        BorderThickness="1"
-                        VerticalAlignment="Center">
-                    <TextBlock x:Name="ModeHintText"
-                               FontSize="9"
-                               VerticalAlignment="Center" />
-                </Border>
             </Grid>
 
-            <TextBox x:Name="SearchBox"
-                     Grid.Row="1"
-                     Height="26"
-                     Padding="8,0,8,0"
-                     FontSize="11.5"
-                     VerticalContentAlignment="Center"
-                     BorderThickness="1"
-                     CornerRadius="7"
-                     PlaceholderText="搜索文件与文件夹"
-                     IsSpellCheckEnabled="False"
-                     IsTextPredictionEnabled="False" />
-
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="1">
                 <Grid x:Name="ChipsPanel" ColumnSpacing="5" RowSpacing="4" />
                 <StackPanel x:Name="ResultsPanel" Spacing="3" Visibility="Collapsed" />
                 <TextBlock x:Name="EmptyText"
@@ -81,6 +66,37 @@
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            Visibility="Collapsed" />
+
+                <!-- 首次使用引导：只出现一次，开始输入或点「跳过」后写入设置，不再出现。 -->
+                <Grid x:Name="GuidePanel" Visibility="Collapsed">
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border x:Name="GuideStep1Dot" Width="16" Height="16" CornerRadius="8" VerticalAlignment="Center">
+                                <TextBlock Text="1" FontSize="9" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock x:Name="GuideStep1Text" FontSize="11" VerticalAlignment="Center"
+                                       Text="不输入：最近访问的文件夹" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border x:Name="GuideStep2Dot" Width="16" Height="16" CornerRadius="8" VerticalAlignment="Center">
+                                <TextBlock Text="2" FontSize="9" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock x:Name="GuideStep2Text" FontSize="11" VerticalAlignment="Center"
+                                       Text="输入即搜索文件与文件夹" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border x:Name="GuideStep3Dot" Width="16" Height="16" CornerRadius="8" VerticalAlignment="Center">
+                                <TextBlock Text="3" FontSize="9" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock x:Name="GuideStep3Text" FontSize="11" VerticalAlignment="Center"
+                                       Text="Enter 打开 · Esc 收起" />
+                            <Border x:Name="GuideSkip" Padding="7,1,7,1" CornerRadius="6" BorderThickness="1"
+                                    VerticalAlignment="Center" Tapped="OnGuideSkipTapped">
+                                <TextBlock x:Name="GuideSkipText" Text="跳过" FontSize="9" VerticalAlignment="Center" />
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Grid>
     </Border>
