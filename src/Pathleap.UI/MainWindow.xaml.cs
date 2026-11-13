@@ -92,7 +92,31 @@ public sealed partial class MainWindow : Window
         RecentStore.Updated += OnRecentUpdated;
         ShowHome();
 
+        // 首次启动主窗给一次三步引导；看过（或跳过）后写设置，不再出现。
+        if (!_lpTheme.OnboardingDone)
+        {
+            GuideOverlay.Visibility = Visibility.Visible;
+        }
+
         AppLog.Info($"主窗口已创建（未显示），HWND=0x{_lpHwnd.ToInt64():X}");
+    }
+
+    private void OnGuideSkipClick(object sender, RoutedEventArgs e)
+    {
+        DismissGuide();
+    }
+
+    private void OnGuideDoneClick(object sender, RoutedEventArgs e)
+    {
+        DismissGuide();
+    }
+
+    private void DismissGuide()
+    {
+        GuideOverlay.Visibility = Visibility.Collapsed;
+        _lpTheme.MarkOnboardingDone();
+        SearchBox.Focus(FocusState.Programmatic);
+        AppLog.Info("主窗口首次引导已关闭");
     }
 
     public Microsoft.UI.Dispatching.DispatcherQueue UiDispatcher => _lpDispatcher;

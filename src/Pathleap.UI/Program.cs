@@ -35,6 +35,12 @@ internal sealed class StartupOptions
     /// <summary>自动化用：--quick-type=文本，配合 --screen=quick 在浮层里真实敲入搜索词。</summary>
     public string QuickType { get; set; } = string.Empty;
 
+    /// <summary>自动化用：--quick-focus，配合 --screen=quick 只把焦点放进搜索框（不输入）。</summary>
+    public bool QuickFocus { get; set; }
+
+    /// <summary>自动化用：--quick-skip-guide，配合 --screen=quick 走一次「跳过」把首次引导写入设置。</summary>
+    public bool QuickSkipGuide { get; set; }
+
     /// <summary>由计划任务拉起的实例：真实参数从 pending 文件恢复，避免循环提权。</summary>
     public bool ElevatedLaunch { get; set; }
 
@@ -76,6 +82,18 @@ internal sealed class StartupOptions
             if (lpArg.StartsWith("--quick-type=", StringComparison.OrdinalIgnoreCase))
             {
                 lpOptions.QuickType = lpArg["--quick-type=".Length..];
+                continue;
+            }
+
+            if (string.Equals(lpArg, "--quick-focus", StringComparison.OrdinalIgnoreCase))
+            {
+                lpOptions.QuickFocus = true;
+                continue;
+            }
+
+            if (string.Equals(lpArg, "--quick-skip-guide", StringComparison.OrdinalIgnoreCase))
+            {
+                lpOptions.QuickSkipGuide = true;
                 continue;
             }
 

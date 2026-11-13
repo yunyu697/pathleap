@@ -193,6 +193,15 @@
                                         <TextBlock Text="更新" FontSize="12" />
                                     </StackPanel>
                                 </Button>
+
+                                <Button x:Name="NavHelp"
+                                        Style="{StaticResource LpNavButtonStyle}"
+                                        Click="OnNavHelpClick">
+                                    <StackPanel Orientation="Horizontal" Spacing="9">
+                                        <FontIcon Glyph="&#xE897;" FontSize="14" />
+                                        <TextBlock Text="帮助" FontSize="12" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
 
                             <StackPanel Grid.Row="2" Margin="16,0,16,14" Spacing="3">
@@ -951,6 +960,63 @@
                                                        TextWrapping="Wrap" />
                                         </Border>
                                     </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel x:Name="PageHelp" Visibility="Collapsed">
+                                <TextBlock Text="帮助"
+                                           FontSize="20"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource Text1Brush}" />
+                                <TextBlock Text="全部内容随应用本地渲染，不依赖外链网页。"
+                                           FontSize="11"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           Margin="0,5,0,0" />
+
+                                <TextBlock Text="主窗口搜索" Style="{StaticResource LpSectionLabelStyle}" Margin="0,22,0,6" />
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           TextWrapping="Wrap"
+                                           LineHeight="19"
+                                           Text="双击 Ctrl 唤出主窗。输入即开始搜索文件、文件夹与已安装程序；↑ ↓ 选择，Enter 打开，Esc 收起。切换搜索范围在「范围」页设置。" />
+
+                                <TextBlock Text="快速切换栏" Style="{StaticResource LpSectionLabelStyle}" Margin="0,20,0,6" />
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           TextWrapping="Wrap"
+                                           LineHeight="19"
+                                           Text="文件对话框打开时自动出现，与对话框同一层、跟随移动，不遮挡对话框内容。不输入时列出最近访问的文件夹，点击直达；输入即搜索当前索引内的文件与文件夹；↑ ↓ 选择，Enter 打开，Esc 先清空输入、再退出搜索态。" />
+
+                                <TextBlock Text="全局热键" Style="{StaticResource LpSectionLabelStyle}" Margin="0,20,0,6" />
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           TextWrapping="Wrap"
+                                           LineHeight="19"
+                                           Text="唤出 / 隐藏搜索框：双击 Ctrl（可在「快捷键」页换成其它预置）。快速切换栏：Ctrl + G。热键冲突时以系统级热键优先，修改预置后立即生效。" />
+
+                                <TextBlock Text="索引与权限" Style="{StaticResource LpSectionLabelStyle}" Margin="0,20,0,6" />
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           TextWrapping="Wrap"
+                                           LineHeight="19"
+                                           Text="索引在后台建立并增量更新，可在「范围」页添加或排除目录；目录越多首次索引越久，但不影响搜索窗口先打开。以标准权限运行时，标准权限的文件对话框可正常注入；提权进程受 Windows UIPI 限制，普通权限窗口不能向提权对话框注入路径。" />
+
+                                <TextBlock Text="更新检查" Style="{StaticResource LpSectionLabelStyle}" Margin="0,20,0,6" />
+                                <TextBlock FontSize="11.5"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           TextWrapping="Wrap"
+                                           LineHeight="19"
+                                           Text="在「更新」页手动检查 GitHub 上的最新版本；也可以在设置里开启启动时自动检查。检查只做一次版本查询，不会自动下载或安装。" />
+
+                                <Border Background="{ThemeResource Surface3Brush}"
+                                        CornerRadius="8"
+                                        Padding="12,10"
+                                        Margin="0,22,0,0">
+                                    <TextBlock FontSize="10.5"
+                                               Foreground="{ThemeResource Text3Brush}"
+                                               TextWrapping="Wrap"
+                                               LineHeight="17"
+                                               Text="首次使用引导只在第一次打开时出现；看过或点过「跳过」后写入设置，不再重复。重置设置或重装后会重新出现。" />
                                 </Border>
                             </StackPanel>
                         </Grid>

@@ -346,6 +346,7 @@ public sealed partial class SettingsWindow : Window
         PageShortcuts.Visibility = page == "shortcuts" ? Visibility.Visible : Visibility.Collapsed;
         PageScope.Visibility = page == "scope" ? Visibility.Visible : Visibility.Collapsed;
         PageUpdate.Visibility = page == "update" ? Visibility.Visible : Visibility.Collapsed;
+        PageHelp.Visibility = page == "help" ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateNavVisuals();
         // 窗口尺寸固定（840×640 DIP），切页只换内容、不改变窗口大小；内容超出时由 ContentScroller 自己滚动。
@@ -368,6 +369,7 @@ public sealed partial class SettingsWindow : Window
         ApplyNav(NavShortcuts, _lpCurrentPage == "shortcuts");
         ApplyNav(NavScope, _lpCurrentPage == "scope");
         ApplyNav(NavUpdate, _lpCurrentPage == "update");
+        ApplyNav(NavHelp, _lpCurrentPage == "help");
     }
 
     private void ApplyNav(Button button, bool selected)
@@ -475,6 +477,8 @@ public sealed partial class SettingsWindow : Window
     private void OnNavScopeClick(object sender, RoutedEventArgs e) => ShowPage("scope");
 
     private void OnNavUpdateClick(object sender, RoutedEventArgs e) => ShowPage("update");
+
+    private void OnNavHelpClick(object sender, RoutedEventArgs e) => ShowPage("help");
 
     private void OnThemeLightTapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {

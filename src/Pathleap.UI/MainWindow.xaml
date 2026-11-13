@@ -398,6 +398,58 @@
                         </StackPanel>
                     </Grid>
                 </Border>
+
+                <!-- 首次使用引导：只出现一次，看过写入 ui 配置；重置或重装后重新出现。 -->
+                <Grid x:Name="GuideOverlay"
+                      Grid.RowSpan="5"
+                      Visibility="Collapsed"
+                      Background="#F20C0E12">
+                    <Border MaxWidth="440"
+                            Padding="26,22"
+                            CornerRadius="14"
+                            VerticalAlignment="Center"
+                            Background="{ThemeResource SurfaceRaisedBrush}"
+                            BorderBrush="{ThemeResource Border2Brush}"
+                            BorderThickness="1">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="三步上手"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource Text1Brush}" />
+                            <StackPanel Spacing="11">
+                                <TextBlock FontSize="12"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           Text="1  不输入时：最近访问的文件夹" />
+                                <TextBlock FontSize="12"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           Text="2  输入即搜索文件、文件夹与程序" />
+                                <TextBlock FontSize="12"
+                                           Foreground="{ThemeResource Text2Brush}"
+                                           Text="3  Enter 打开 · Esc 清空或收起" />
+                            </StackPanel>
+                            <TextBlock FontSize="10"
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource Text4Brush}"
+                                       Text="完整说明在「设置 › 帮助」里，离线可读。" />
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="8"
+                                        HorizontalAlignment="Right">
+                                <Button Content="跳过"
+                                        Click="OnGuideSkipClick"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Foreground="{ThemeResource Text3Brush}" />
+                                <Button Content="知道了"
+                                        Click="OnGuideDoneClick"
+                                        Background="{ThemeResource AccentBrush}"
+                                        Foreground="White"
+                                        BorderThickness="0"
+                                        CornerRadius="6"
+                                        Padding="16,5" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

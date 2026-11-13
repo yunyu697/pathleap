@@ -914,11 +914,23 @@ public partial class App : Application
 
             case "quick":
                 OpenQuickSwitch();
-                if (!string.IsNullOrEmpty(Program.Startup.QuickType))
+                if (!string.IsNullOrEmpty(Program.Startup.QuickType) || Program.Startup.QuickFocus || Program.Startup.QuickSkipGuide)
                 {
                     await Task.Delay(700);
                     var lpQuickBar = Volatile.Read(ref _lpKeyboardBar) ?? _lpDetachedBar;
-                    lpQuickBar?.TypeForTest(Program.Startup.QuickType);
+                    if (Program.Startup.QuickSkipGuide)
+                    {
+                        lpQuickBar?.DismissGuideForTest();
+                        await Task.Delay(400);
+                    }
+                    else if (!string.IsNullOrEmpty(Program.Startup.QuickType))
+                    {
+                        lpQuickBar?.TypeForTest(Program.Startup.QuickType);
+                    }
+                    else
+                    {
+                        lpQuickBar?.FocusForTest();
+                    }
                 }
 
                 break;
@@ -938,6 +950,10 @@ public partial class App : Application
 
             case "settings-update":
                 OpenSettings("update");
+                break;
+
+            case "settings-help":
+                OpenSettings("help");
                 break;
 
             case "update":
