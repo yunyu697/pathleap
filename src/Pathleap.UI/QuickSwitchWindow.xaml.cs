@@ -37,6 +37,7 @@ public sealed partial class QuickSwitchWindow : Window
     private readonly List<QuickFolder> _lpFolders = new();
     private readonly List<SearchHitDto> _lpResults = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _lpSearchTimer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _lpFollowTimer;
     private FileDialogInfo _lpDialog = FileDialogInfo.None;
     private IntPtr _lpHandle = IntPtr.Zero;
     private bool _lpDetached;
@@ -55,6 +56,11 @@ public sealed partial class QuickSwitchWindow : Window
     private bool _lpSearching;
     private int _lpSearchGeneration;
     private string _lpBodyKey = string.Empty;
+    private DateTimeOffset _lpFollowUntil;
+    private int _lpLastX = int.MinValue;
+    private int _lpLastY = int.MinValue;
+    private int _lpLastWidth = int.MinValue;
+    private int _lpLastHeight = int.MinValue;
 
     private readonly record struct QuickFolder(string Name, string Path, bool IsCurrent);
 
@@ -78,6 +84,13 @@ public sealed partial class QuickSwitchWindow : Window
         _lpSearchTimer.Interval = TimeSpan.FromMilliseconds(140);
         _lpSearchTimer.IsRepeating = false;
         _lpSearchTimer.Tick += (_, _) => _ = RunSearchAsync(SearchBox.Text);
+
+        // 拖动/缩放对话框时，WinEvent 会合并位置事件；这里用短时 16ms 跟随窗口补帧，
+        // 几何不变就不调用 SetWindowPos，静止后自动停表。
+        _lpFollowTimer = DispatcherQueue.CreateTimer();
+        _lpFollowTimer.Interval = TimeSpan.FromMilliseconds(16);
+        _lpFollowTimer.IsRepeating = true;
+        _lpFollowTimer.Tick += (_, _) => OnFollowTick();
         SearchBox.TextChanged += OnSearchTextChanged;
         SearchBox.PreviewKeyDown += OnSearchPreviewKeyDown;
         SearchBox.GotFocus += OnSearchGotFocus;
@@ -175,6 +188,11 @@ public sealed partial class QuickSwitchWindow : Window
 
         QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
         _lpShown = false;
+        _lpLastX = int.MinValue;
+        _lpLastY = int.MinValue;
+        _lpLastWidth = int.MinValue;
+        _lpLastHeight = int.MinValue;
+        _lpFollowTimer.Stop();
     }
 
     private void ConfigureWindow()
@@ -332,6 +350,48 @@ public sealed partial class QuickSwitchWindow : Window
         }
 
         ShowIfNeeded();
+        StartFollowBurst();
+        PositionAttached();
+    }
+
+    /// <summary>
+    /// 结束拖动后仍保留一小段跟随窗口，等 WinEvent 的最后一次合并事件落地；期间每 16ms 读一次真实几何。
+    /// </summary>
+    private void StartFollowBurst()
+    {
+        _lpFollowUntil = DateTimeOffset.Now.AddMilliseconds(450);
+        if (!_lpFollowTimer.IsRunning)
+        {
+            _lpFollowTimer.Start();
+        }
+    }
+
+    private void OnFollowTick()
+    {
+        if (!_lpShown || _lpDetached)
+        {
+            _lpFollowTimer.Stop();
+            return;
+        }
+
+        if (DateTimeOffset.Now > _lpFollowUntil)
+        {
+            _lpFollowTimer.Stop();
+            return;
+        }
+
+        if (!_lpDialog.IsFileDialog || !QuickSwitchNative.IsWindow(_lpDialog.Handle))
+        {
+            _lpFollowTimer.Stop();
+            return;
+        }
+
+        if (QuickSwitchNative.IsIconic(_lpDialog.Handle))
+        {
+            HideIfShown();
+            return;
+        }
+
         PositionAttached();
     }
 
@@ -416,6 +476,17 @@ public sealed partial class QuickSwitchWindow : Window
             _lpBarHeightPx = lpBar.Height;
             _lpColumns = lpBar.Columns;
             RefreshBody();
+
+            if (lpBar.X == _lpLastX && lpBar.Y == _lpLastY &&
+                lpBar.Width == _lpLastWidth && lpBar.Height == _lpLastHeight)
+            {
+                return;
+            }
+
+            _lpLastX = lpBar.X;
+            _lpLastY = lpBar.Y;
+            _lpLastWidth = lpBar.Width;
+            _lpLastHeight = lpBar.Height;
 
             QuickSwitchNative.SetWindowPos(
                 _lpHandle,
