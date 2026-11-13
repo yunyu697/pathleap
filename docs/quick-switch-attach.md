@@ -221,3 +221,88 @@
 4. 栏宽度严格取对话框可视宽度的一半，因此窄对话框（约 600px 以下）时每格文字会省略显示，悬停 tooltip 显示完整路径。
 5. **对话框横跨两块显示器**时，栏只贴在被系统选中（约等于所占面积更大）那块屏的内侧，会因夹紧而不再与对话框水平居中；
    跨屏拖动过程中每次位置变化都会重算，但不同 DPI 下的 `WM_DPICHANGED` 重排未在真机验证。
+
+## 1.0.9 改版：搜索框、同层与界面清理（2026-11-13）
+
+本轮按用户三条反馈改：搜索框要像主搜索窗、栏必须与对话框同层、栏内不要常驻说明文字（改首次引导 + 设置帮助页）。
+搜索本身在 1.0.9 之前的提交里已接入真实索引查询，这里记录的是视觉与层级部分的实测。
+
+### 搜索框：按主搜索窗对齐，不照设计稿
+
+`docs/design-reference.html` 的「02 快速切换」只画了 `qs-head`（图标 + 标题「快速切换」+ 副标题「已打开的文件夹」+ 计数），
+**没有搜索输入框**；而用户明确要求去掉这行标题文字。因此这一段无法照设计稿，改为对齐主搜索窗的输入框。
+差异只在「栏的尺度放不下主窗字号」这一点上，其余（配色、占位符颜色、焦点处理、图标位置）逐项对齐：
+
+| 对齐项 | 主搜索窗 | QS 栏（1.0.9） | 说明 |
+| --- | --- | --- | --- |
+| 容器圆角 / 描边 | 根边框 14 DIP，内容区无输入框描边 | 根边框 10 DIP，输入框 0 描边 | 栏是附属面板，圆角随栏体收敛；描边层级一致（都只有一层 DWM 边框） |
+| 字号层级 | 20 DIP / SemiBold | 14 DIP / SemiBold | 栏宽约为主窗一半，20 会挤掉占位文案；字重与字体一致 |
+| 高度 | `MinHeight=30` | `Height=26` | 与栏内 18 DIP 品牌点、9.5 DIP 计数同一基线居中 |
+| 左右内边距 | 容栏 `Padding=18,18,18,16` | `Padding=12,9,12,9` | 按栏体缩小 |
+| 图标 | 22×22 圆角 7 品牌点 | 18×18 圆角 5 品牌点 | 同一符号，等比缩小 |
+| 占位文字 | 「搜索文件、文件夹或程序…」/ `Text4Brush` | 「搜索文件与文件夹」/ `Text4Brush` | 栏只管路径搜索，不提「程序」，颜色一致 |
+| 输入文字基线 | `VerticalContentAlignment=Center` | `VerticalContentAlignment=Center` | 一致 |
+| 焦点态 | 边框 0、背景透明，靠光标与选中行 | 边框 0、背景透明，靠光标与选中行 | 两处都把 `TextControlBorder*`/`TextControlBackground*` 资源置为 0/透明，焦点不额外描边 |
+| 选中高亮 | `#4D3D6EF7` | `#4D3D6EF7` | 同一个值 |
+
+对比图：[55-quickbar-searchbox-compare.png](shots/55-quickbar-searchbox-compare.png)（同位置裁切、放大 2 倍，上为改版前裸输入框，下为改版后）。
+状态实拍：[58-quickbar-noguide.png](shots/58-quickbar-noguide.png)（无输入）、
+[49-quickbar-search.png](shots/49-quickbar-search.png)（输入中，6 条结果）、
+[54-quickbar-focus.png](shots/54-quickbar-focus.png)（聚焦，光标在占位符位置）。
+**未覆盖**：鼠标悬停（`PointerOver`）态没有单独实拍——栏是 `WS_EX_NOACTIVATE` 工具窗，离屏 `PrintWindow` 抓不到悬停反馈；
+代码路径与主窗共用同一套资源覆盖，按代码对齐，未做像素证据。
+
+### 栏与对话框同层：z 序实测
+
+口径：栏是对话框的 **owned 窗口**（`GWLP_HWNDPARENT`），不是 `SetParent` 子窗、不是 topmost。
+采样脚本 `tools/Test-LpQuickBarProbe.ps1`，原始输出 `%TEMP%\pathleap-scaling\qs-probe-final4.txt`。
+读取项：`GetWindow(GW_HWNDPREV/NEXT)` 逐条枚举 z 序、`IsWindowVisible`、`GetWindowRect` 的相邻偏移、以及遮挡窗下的像素采样。
+
+| 场景 | 采样结果 | 判定 |
+| --- | --- | --- |
+| 空闲吸附 | 栏 `visible=True`，`ex=0x8000180`（TOOLWINDOW+NOACTIVATE，非 TOPMOST），矩形 369,1012 709×164；`dialogAboveBarOffset=1`，两矩形无重叠 | 通过 |
+| 另一个应用窗口盖住对话框 | 遮挡窗取得前台后：对话框像素 `#FF00FF`（被盖），**栏 `IsWindowVisible=False`**（随宿主一起被盖），栏-对话框矩形无重叠 | 通过 |
+| 遮挡移除、对话框回前台 | 栏 `True` | 通过 |
+| 点击进入输入态 | 栏成为前台（输入必须收键盘），`dialogBelowBar=True`，但几何仍是对话框外侧，无重叠；`dialogAboveBarOffset=-1` 表示栏在对话框之上 | 通过（见限制 1） |
+| 对话框最小化 / 还原 | 栏 `True → False → True` | 通过 |
+| 两个对话框各一条栏 | `bar1.owner=dialog1`、`bar2.owner=dialog2`；切前台时只显示对应那条；关闭 dialog2 后 `bar2` 不存在、`bar1` 正常 | 通过 |
+| 宿主重新激活后 | 系统会把 owned 窗口抬到宿主之上。已加 `ReorderBelowOwner()` + 150/700ms 延后重排（不带 `SWP_SHOWWINDOW`，避免宿主最小化时把栏又显示出来），空闲态实测仍为 `dialogAboveBarOffset=-1`（栏在对话框上方一级） | **部分未达标** |
+
+关于最后一行：Windows 对 owned 窗口的默认行为就是「宿主激活后把 owned 窗抬到宿主之上」，
+两次延后 `SetWindowPos` 只能缩短但不能消除这个窗口。实际影响限于「栏贴在对话框外侧、不压内容」，
+但当别的窗口正好插在对话框与栏之间时，栏可能显示在那个窗口之上。这一点没有完全修好，如实记录，不写成「已修复」。
+
+### 常驻文字清理、首次引导与帮助页
+
+| 项 | 改版前 | 1.0.9 |
+| --- | --- | --- |
+| 栏头 | 标题「快速切换」+ 副标题「已打开的文件夹」+ 常驻说明 | 只留品牌点 + 搜索框 + 结果计数，整行 26 DIP |
+| 栏高（6 个文件夹、3 列） | 103 DIP（截图 960×206） | **82 DIP（截图 960×164）**，省 21 DIP |
+| 首次引导 | 无 | 首次唤出显示三步（不输入=最近文件夹 / 输入即搜索 / Enter 打开）+「跳过」，出现一次后写设置 |
+| 设置帮助 | 无 | 设置新增「帮助」页，离线本地渲染，覆盖主窗搜索、QS 与键盘、全局热键、索引与权限、更新检查 |
+
+对比图 [60-quickbar-cleanup-compare.png](shots/60-quickbar-cleanup-compare.png)；
+引导 [56-quickbar-guide.png](shots/56-quickbar-guide.png)、点跳过 [57-quickbar-skip.png](shots/57-quickbar-skip.png)、
+跳过/已读后再唤起 [58-quickbar-noguide.png](shots/58-quickbar-noguide.png)；帮助页 [59-settings-help.png](shots/59-settings-help.png)。
+
+### 补充实拍：键入、边缘像素、点击闪烁、拖动跟随
+
+| # | 项 | 数据 | 截图/原文 |
+| --- | --- | --- | --- |
+| 48 | 无输入最近列表 | 960×206（改版前基准），6 格 3 列 | [48-quickbar-recent.png](shots/48-quickbar-recent.png) |
+| 49 | 真实键入 `path` | 960×484，6 条结果，占位符消失、光标在尾部 | [49-quickbar-search.png](shots/49-quickbar-search.png) |
+| 50 | 栏右边缘逐像素 | `0:#383A40 1:#383A40 2:#171A21`：只剩 1 DIP DWM 边框 + 1px 抗锯齿过渡，没有第二层描边 | 见下方说明 |
+| — | 点击闪烁 | 900ms 内 378,475 个采样，`visChanges=0 barMoves=0 dlgMoves=0`，矩形全程 369,1012 709×164 | `qs-probe-final4.txt` §3 |
+| — | 拖动跟随 | 12 步 × 6px，栏位置延迟 19.07 / 14.05 / 12.10 / 14.48 / 18.12 / 11.54 / 13.60 / 12.36 / 12.80 / 12.20 / 12.82 / 14.54 ms，每步 `settled=True` | `qs-probe-final4.txt` §5 |
+
+边缘像素的取法：从栏右边缘向内取 3 个像素的 RGB。改版后第 0/1 像素是同一个 `#383A40`（主题边框色），
+第 2 像素直接进入内容底色 `#171A21`；说明 WinUI 那层自绘描边已经去掉，可视边框只剩 DWM 的一层。
+
+### 限制
+
+1. **输入态时栏是前台窗口**：要接收键盘就必须成为前台，此时它在 z 序上高于对话框。栏的矩形在对话框外侧（不重叠），
+   因此不遮挡任何对话框内容；但这与「任何情况下都不越到对话框之上」的字面要求有出入，属于输入交互的必要代价。
+2. **宿主重新激活后栏可能被系统抬到宿主之上**：见上面 z 序表最后一行，未完全消除。
+3. 搜索框的悬停态无像素证据（栏不接收鼠标激活，离屏抓取不到悬停反馈）。
+4. `--screen`/`PrintWindow` 在栏隐藏（后台宿主）时抓到的是桌面底色，不能用来判断栏本身的遮挡，这一场景只用
+   `IsWindowVisible` 与矩形关系判定。
