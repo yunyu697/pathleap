@@ -9,8 +9,9 @@ internal static class QuickSwitchLayout
 {
     public const int MaxRows = 6;
     public const double RowHeightDip = 32;
-    public const double HeaderHeightDip = 34;
-    public const double BodyPaddingDip = 12;
+    public const double HeaderHeightDip = 32;
+    public const double SearchHeightDip = 31;
+    public const double BodyPaddingDip = 8;
 
     /// <summary>宽度达到这个 DIP 值时内容改成 6 列，否则 3 列。</summary>
     public const double WideColumnsMinDip = 680;
@@ -39,11 +40,17 @@ internal static class QuickSwitchLayout
         return widthPx < lpNarrow ? 2 : 3;
     }
 
-    public static int Height(int widthPx, double scale, int folderCount)
+    /// <summary>
+    /// 栏高：标题行 + 搜索框 + 内容行。最近文件夹按网格排列（列数随宽度变化），
+    /// 搜索结果按单列列表排列（<paramref name="listMode"/>），两者共用同一套行高与上限。
+    /// </summary>
+    public static int Height(int widthPx, double scale, int itemCount, bool listMode = false)
     {
-        var lpColumns = Columns(widthPx, scale);
-        var lpRows = (int)Math.Ceiling(Math.Min(MaxRows, Math.Max(1, folderCount)) / (double)lpColumns);
-        return (int)Math.Round((HeaderHeightDip + Math.Max(1, lpRows) * RowHeightDip + BodyPaddingDip) * scale);
+        var lpRows = listMode
+            ? Math.Clamp(itemCount, 1, MaxRows)
+            : (int)Math.Ceiling(Math.Min(MaxRows, Math.Max(1, itemCount)) / (double)Columns(widthPx, scale));
+        return (int)Math.Round(
+            (HeaderHeightDip + SearchHeightDip + Math.Max(1, lpRows) * RowHeightDip + BodyPaddingDip) * scale);
     }
 
     /// <summary>
@@ -57,12 +64,13 @@ internal static class QuickSwitchLayout
         NativeMethods.Rect work,
         bool hasWork,
         double scale,
-        int folderCount)
+        int itemCount,
+        bool listMode = false)
     {
         var lpScale = Math.Max(1.0, scale);
         var lpWidth = Math.Max(1, (int)Math.Round(frame.Width * 0.5));
-        var lpHeight = Height(lpWidth, lpScale, folderCount);
-        var lpColumns = Columns(lpWidth, lpScale);
+        var lpHeight = Height(lpWidth, lpScale, itemCount, listMode);
+        var lpColumns = listMode ? 1 : Columns(lpWidth, lpScale);
 
         var lpX = frame.Left + (frame.Width - lpWidth) / 2;
 

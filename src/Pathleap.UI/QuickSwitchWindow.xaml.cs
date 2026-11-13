@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
+using Pathleap.Shared.Ipc;
 using Pathleap.UI.Data;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Theme;
@@ -28,21 +29,32 @@ namespace Pathleap.UI;
 public sealed partial class QuickSwitchWindow : Window
 {
     private const int MaxRows = QuickSwitchLayout.MaxRows;
+    private const int SearchLimit = 6;
+    private static readonly Color FolderColor = Color.FromArgb(255, 215, 160, 58);
+    private static readonly Color FileColor = Color.FromArgb(255, 76, 134, 240);
 
     private readonly AppConfig _lpConfig;
     private readonly List<QuickFolder> _lpFolders = new();
+    private readonly List<SearchHitDto> _lpResults = new();
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _lpSearchTimer;
     private FileDialogInfo _lpDialog = FileDialogInfo.None;
     private IntPtr _lpHandle = IntPtr.Zero;
     private bool _lpDetached;
     private IntPtr _lpOwner;
     private bool _lpKeyboardActive;
+    private bool _lpInputMode;
     private bool _lpShown;
     private int _lpSelected;
+    private int _lpResultSelected;
     private int _lpColumns = 6;
     private int _lpBarWidthPx = 426;
     private int _lpBarHeightPx = 78;
     private double _lpScale = 1.0;
     private bool _lpForegroundActive = true;
+    private bool _lpSearchMode;
+    private bool _lpSearching;
+    private int _lpSearchGeneration;
+    private string _lpBodyKey = string.Empty;
 
     private readonly record struct QuickFolder(string Name, string Path, bool IsCurrent);
 
@@ -60,11 +72,40 @@ public sealed partial class QuickSwitchWindow : Window
         Title = $"{Branding.DisplayName} 快速切换";
         _lpHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         ConfigureWindow();
+
+        _lpSearchTimer = DispatcherQueue.CreateTimer();
+        _lpSearchTimer.Interval = TimeSpan.FromMilliseconds(140);
+        _lpSearchTimer.IsRepeating = false;
+        _lpSearchTimer.Tick += (_, _) => _ = RunSearchAsync(SearchBox.Text);
+        SearchBox.TextChanged += OnSearchTextChanged;
+        SearchBox.PreviewKeyDown += OnSearchPreviewKeyDown;
+        SearchBox.GotFocus += OnSearchGotFocus;
+
         ApplyTheme();
         LoadFolders();
-        BuildChips();
+        RefreshBody(true);
         AppWindow.Changed += OnAppWindowChanged;
+        Activated += OnActivated;
         Closed += OnClosed;
+    }
+
+    /// <summary>
+    /// 用户点到别处（栏失去激活）时结束输入态：否则下一次 Ctrl+G 会以为已经在输入态而不再取焦点。
+    /// </summary>
+    private void OnActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState != WindowActivationState.Deactivated || !_lpInputMode)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_lpInputMode && QuickSwitchNative.GetForegroundWindow() != _lpHandle)
+            {
+                EndKeyboardMode(false);
+            }
+        });
     }
 
     /// <summary>
@@ -80,6 +121,9 @@ public sealed partial class QuickSwitchWindow : Window
     }
 
     public IntPtr DialogHandle => _lpDialog.Handle;
+
+    /// <summary>栏自身的窗口句柄；宿主据此判断前台是否已经落在栏上（输入态）。</summary>
+    public IntPtr Handle => _lpHandle;
 
     public bool IsAttached => _lpDialog.IsFileDialog;
 
@@ -148,11 +192,15 @@ public sealed partial class QuickSwitchWindow : Window
         HintChip.Background = ThemeService.Instance.TrackOffBrush;
         HintChip.BorderBrush = ThemeService.Instance.TrackOffBorderBrush;
 
-        // 文件夹卡片是在代码里建的一次性控件，配色变了要重建才能换掉已写入的画刷实例。
-        if (ChipsPanel.Children.Count > 0)
-        {
-            BuildChips();
-        }
+        SearchBox.Background = ThemeService.Instance.Surface2Brush;
+        SearchBox.BorderBrush = ThemeService.Instance.Border2Brush;
+        SearchBox.Foreground = ThemeService.Instance.Text1Brush;
+        SearchBox.PlaceholderForeground = ThemeService.Instance.Text3Brush;
+        EmptyText.Foreground = ThemeService.Instance.Text3Brush;
+
+        // 文件夹卡片与结果行是在代码里建的一次性控件，配色变了要重建才能换掉已写入的画刷实例。
+        _lpBodyKey = string.Empty;
+        RefreshBody();
     }
 
     private void UpdateChrome()
@@ -170,8 +218,10 @@ public sealed partial class QuickSwitchWindow : Window
             SubtitleText.Text = "未检测到文件对话框";
         }
 
-        CountText.Text = $"{_lpFolders.Count} 个文件夹";
-        ModeHintText.Text = _lpKeyboardActive ? "1–6 · ↵ · Esc" : "Ctrl+G 激活";
+        CountText.Text = _lpSearchMode
+            ? (_lpSearching ? "搜索中…" : $"{_lpResults.Count} 个结果")
+            : $"{_lpFolders.Count} 个文件夹";
+        ModeHintText.Text = _lpKeyboardActive ? "↑↓ · ↵ · Esc" : "Ctrl+G 搜索";
         ApplyTheme();
     }
 
@@ -182,7 +232,7 @@ public sealed partial class QuickSwitchWindow : Window
         _lpDetached = false;
         _lpSelected = 0;
         LoadFolders();
-        BuildChips();
+        RefreshBody(true);
         UpdateChrome();
         SetOwner(dialog.Handle);
         PositionAttached();
@@ -203,7 +253,7 @@ public sealed partial class QuickSwitchWindow : Window
         _lpDetached = true;
         _lpSelected = 0;
         LoadFolders();
-        BuildChips();
+        RefreshBody(true);
         UpdateChrome();
         SetOwner(ownerHwnd);
         PositionDetached();
@@ -331,12 +381,13 @@ public sealed partial class QuickSwitchWindow : Window
                 lpMonitorInfo.Work,
                 lpHasWork,
                 _lpScale,
-                _lpFolders.Count);
+                _lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count,
+                _lpSearchMode);
 
             _lpBarWidthPx = lpBar.Width;
             _lpBarHeightPx = lpBar.Height;
             _lpColumns = lpBar.Columns;
-            BuildChips();
+            RefreshBody();
 
             QuickSwitchNative.SetWindowPos(
                 _lpHandle,
@@ -365,7 +416,11 @@ public sealed partial class QuickSwitchWindow : Window
             _lpScale = DpiUtil.Scale(this);
             var lpWork = DisplayArea.Primary.WorkArea;
             var lpWidth = (int)Math.Round(480 * _lpScale);
-            var lpHeight = QuickSwitchLayout.Height(lpWidth, _lpScale, _lpFolders.Count);
+            var lpHeight = QuickSwitchLayout.Height(
+                lpWidth,
+                _lpScale,
+                _lpSearchMode ? Math.Min(MaxRows, Math.Max(1, _lpResults.Count)) : _lpFolders.Count,
+                _lpSearchMode);
             _lpBarWidthPx = lpWidth;
             _lpBarHeightPx = lpHeight;
             ReflowChips(lpWidth);
@@ -403,26 +458,32 @@ public sealed partial class QuickSwitchWindow : Window
 
     public void SetKeyboardActive(bool active)
     {
-        if (_lpKeyboardActive == active)
+        if (active)
         {
+            if (!_lpKeyboardActive || !_lpInputMode)
+            {
+                EnterInputMode();
+            }
+
             return;
         }
 
-        _lpKeyboardActive = active;
-        BuildChips();
-        UpdateChrome();
+        if (_lpKeyboardActive || _lpInputMode)
+        {
+            EndKeyboardMode(false);
+        }
     }
 
-    /// <summary>处理来自全局键盘钩子的按键（只在该对话框为前台且本栏激活时调用）。</summary>
+    /// <summary>处理来自全局键盘钩子的按键（只在该对话框为前台、栏本身未取得焦点时调用）。</summary>
     public void HandleKey(int virtualKey)
     {
         switch (virtualKey)
         {
-            case 0x1B: // Esc：退出键盘模式，栏保持吸附（生命周期只随对话框）
-                ExitKeyboardMode();
+            case 0x1B: // Esc：先清空搜索，再退出键盘模式
+                HandleEscape();
                 return;
             case 0x0D: // Enter
-                Pick(Math.Clamp(_lpSelected, 0, Math.Max(0, _lpFolders.Count - 1)));
+                CommitSelection();
                 return;
             case 0x26: // Up
                 MoveSelection(-1);
@@ -430,6 +491,11 @@ public sealed partial class QuickSwitchWindow : Window
             case 0x28: // Down
                 MoveSelection(1);
                 return;
+        }
+
+        if (_lpSearchMode)
+        {
+            return;
         }
 
         var lpIndex = virtualKey switch
@@ -445,15 +511,56 @@ public sealed partial class QuickSwitchWindow : Window
         }
     }
 
+    private void HandleEscape()
+    {
+        if (SearchBox.Text.Length > 0)
+        {
+            SearchBox.Text = string.Empty;
+            return;
+        }
+
+        ExitKeyboardMode();
+    }
+
+    private void CommitSelection()
+    {
+        if (_lpSearchMode)
+        {
+            if (_lpResults.Count > 0)
+            {
+                PickResult(Math.Clamp(_lpResultSelected, 0, _lpResults.Count - 1));
+            }
+
+            return;
+        }
+
+        if (_lpFolders.Count > 0)
+        {
+            Pick(Math.Clamp(_lpSelected, 0, _lpFolders.Count - 1));
+        }
+    }
+
     private void MoveSelection(int delta)
     {
+        if (_lpSearchMode)
+        {
+            if (_lpResults.Count == 0)
+            {
+                return;
+            }
+
+            _lpResultSelected = (_lpResultSelected + delta + _lpResults.Count) % _lpResults.Count;
+            RefreshBody(true);
+            return;
+        }
+
         if (_lpFolders.Count == 0)
         {
             return;
         }
 
         _lpSelected = (_lpSelected + delta + _lpFolders.Count) % _lpFolders.Count;
-        BuildChips();
+        RefreshBody(true);
     }
 
     /// <summary>预览/截图模式下按序号选择（不依赖键盘模式）。</summary>
@@ -462,18 +569,58 @@ public sealed partial class QuickSwitchWindow : Window
         Pick(index);
     }
 
-    /// <summary>退出键盘模式，栏继续吸附在对话框上。</summary>
+    /// <summary>截图/自动化用：进入输入态后用系统级按键真实敲入一段文本。</summary>
+    public void TypeForTest(string text)
+    {
+        if (!_lpInputMode)
+        {
+            EnterInputMode();
+        }
+
+        foreach (var lpChar in text)
+        {
+            var lpScan = VkKeyScanW(lpChar);
+            if (lpScan == -1)
+            {
+                AppLog.Warn($"测试键入跳过无法映射的字符: {lpChar}");
+                continue;
+            }
+
+            var lpVirtual = (byte)(lpScan & 0xFF);
+            var lpShift = (lpScan & 0x0100) != 0;
+            if (lpShift)
+            {
+                keybd_event(0x10, 0, 0, UIntPtr.Zero);
+            }
+
+            keybd_event(lpVirtual, 0, 0, UIntPtr.Zero);
+            keybd_event(lpVirtual, 0, 2, UIntPtr.Zero);
+            if (lpShift)
+            {
+                keybd_event(0x10, 0, 2, UIntPtr.Zero);
+            }
+
+            Thread.Sleep(45);
+        }
+
+        AppLog.Info($"快速切换栏测试键入完成: 目标={text} 实际={SearchBox.Text}");
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern short VkKeyScanW(char ch);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    /// <summary>退出键盘模式，栏继续吸附在对话框上；焦点交还对话框。</summary>
     public void ExitKeyboardMode()
     {
-        if (!_lpKeyboardActive)
+        if (!_lpKeyboardActive && !_lpInputMode)
         {
             return;
         }
 
-        _lpKeyboardActive = false;
-        BuildChips();
-        UpdateChrome();
-        KeyboardEnded?.Invoke();
+        EndKeyboardMode(true);
     }
 
     /// <summary>隐藏本栏并结束键盘模式；对话框本身不受影响。</summary>
@@ -482,13 +629,19 @@ public sealed partial class QuickSwitchWindow : Window
         _lpShown = false;
         AppWindow.Hide();
 
-        if (_lpKeyboardActive)
+        if (_lpKeyboardActive || _lpInputMode)
         {
-            _lpKeyboardActive = false;
-            BuildChips();
-            UpdateChrome();
-            KeyboardEnded?.Invoke();
+            EndKeyboardMode(false);
         }
+    }
+
+    private void EndKeyboardMode(bool returnFocus)
+    {
+        _lpKeyboardActive = false;
+        ExitInputMode(returnFocus);
+        _lpBodyKey = string.Empty;
+        UpdateChrome();
+        KeyboardEnded?.Invoke();
     }
 
     private void Pick(int index)
@@ -498,36 +651,282 @@ public sealed partial class QuickSwitchWindow : Window
             return;
         }
 
-        var lpFolder = _lpFolders[index];
+        var lpPath = _lpFolders[index].Path;
         var lpInjected = false;
         if (_lpDialog.IsFileDialog)
         {
-            lpInjected = FileDialogInjector.TryInject(_lpDialog.Handle, lpFolder.Path);
+            lpInjected = FileDialogInjector.TryInject(_lpDialog.Handle, lpPath);
         }
 
         if (!lpInjected)
         {
-            try
+            OpenWithShell(lpPath);
+        }
+
+        if (_lpKeyboardActive || _lpInputMode)
+        {
+            EndKeyboardMode(true);
+        }
+    }
+
+    private void PickResult(int index)
+    {
+        if (index < 0 || index >= _lpResults.Count)
+        {
+            return;
+        }
+
+        var lpPath = _lpResults[index].Path;
+        var lpInjected = false;
+        if (_lpDialog.IsFileDialog)
+        {
+            lpInjected = FileDialogInjector.TryInject(_lpDialog.Handle, lpPath);
+        }
+
+        if (!lpInjected)
+        {
+            OpenWithShell(lpPath);
+        }
+
+        if (_lpKeyboardActive || _lpInputMode)
+        {
+            EndKeyboardMode(true);
+        }
+    }
+
+    private static void OpenWithShell(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = $"\"{lpFolder.Path}\"",
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
+                FileName = "explorer.exe",
+                Arguments = $"\"{path}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"打开失败 {path}: {ex.Message}");
+        }
+    }
+
+    /// <summary>进入可输入状态：去掉 WS_EX_NOACTIVATE、把栏切到前台，并把焦点交给搜索框。</summary>
+    private void EnterInputMode()
+    {
+        if (_lpInputMode)
+        {
+            return;
+        }
+
+        _lpInputMode = true;
+        _lpKeyboardActive = true;
+        ApplyNoActivate(false);
+        ActivateForInput();
+        _lpBodyKey = string.Empty;
+        UpdateChrome();
+    }
+
+    private void ExitInputMode(bool returnFocus)
+    {
+        if (!_lpInputMode)
+        {
+            return;
+        }
+
+        _lpInputMode = false;
+        if (returnFocus && QuickSwitchNative.GetForegroundWindow() == _lpHandle)
+        {
+            var lpTarget = _lpDialog.IsFileDialog ? _lpDialog.Handle : _lpOwner;
+            if (lpTarget != IntPtr.Zero && QuickSwitchNative.IsWindow(lpTarget))
             {
-                AppLog.Warn($"打开文件夹失败: {ex.Message}");
+                QuickSwitchNative.SetForegroundWindow(lpTarget);
             }
         }
 
-        if (_lpKeyboardActive)
+        ApplyNoActivate(true);
+    }
+
+    private void ApplyNoActivate(bool enabled)
+    {
+        if (!QuickSwitchNative.IsWindow(_lpHandle))
         {
-            _lpKeyboardActive = false;
-            BuildChips();
+            return;
+        }
+
+        var lpExStyle = QuickSwitchNative.GetWindowLongPtr(_lpHandle, QuickSwitchNative.GwlExstyle).ToInt64();
+        var lpNext = enabled
+            ? lpExStyle | QuickSwitchNative.WsExNoActivate
+            : lpExStyle & ~QuickSwitchNative.WsExNoActivate;
+        if (lpNext != lpExStyle)
+        {
+            QuickSwitchNative.SetWindowLongPtr(_lpHandle, QuickSwitchNative.GwlExstyle, (IntPtr)lpNext);
+        }
+    }
+
+    private void ActivateForInput()
+    {
+        try
+        {
+            Activate();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"快速切换栏激活失败: {ex.Message}");
+        }
+
+        if (QuickSwitchNative.GetForegroundWindow() != _lpHandle)
+        {
+            var lpCurrent = QuickSwitchNative.GetCurrentThreadId();
+            var lpForeground = QuickSwitchNative.GetForegroundWindow();
+            var lpForegroundThread = QuickSwitchNative.GetWindowThreadProcessId(lpForeground, IntPtr.Zero);
+            var lpAttached = lpCurrent != lpForegroundThread
+                             && QuickSwitchNative.AttachThreadInput(lpCurrent, lpForegroundThread, true);
+            try
+            {
+                QuickSwitchNative.SetForegroundWindow(_lpHandle);
+            }
+            finally
+            {
+                if (lpAttached)
+                {
+                    QuickSwitchNative.AttachThreadInput(lpCurrent, lpForegroundThread, false);
+                }
+            }
+        }
+
+        SearchBox.Focus(FocusState.Programmatic);
+        SearchBox.SelectAll();
+        AppLog.Info($"快速切换栏进入输入模式: foreground=0x{QuickSwitchNative.GetForegroundWindow().ToInt64():X}");
+    }
+
+    private void OnSearchGotFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_lpInputMode)
+        {
+            EnterInputMode();
+        }
+    }
+
+    private void OnSearchPreviewKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Escape:
+                e.Handled = true;
+                HandleEscape();
+                break;
+            case Windows.System.VirtualKey.Enter:
+                e.Handled = true;
+                CommitSelection();
+                break;
+            case Windows.System.VirtualKey.Up:
+                e.Handled = true;
+                MoveSelection(-1);
+                break;
+            case Windows.System.VirtualKey.Down:
+                e.Handled = true;
+                MoveSelection(1);
+                break;
+        }
+    }
+
+    private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
+    {
+        var lpQuery = SearchBox.Text.Trim();
+        _lpSearchMode = lpQuery.Length > 0;
+        _lpSearchGeneration++;
+        _lpResultSelected = -1;
+
+        if (!_lpSearchMode)
+        {
+            _lpSearchTimer.Stop();
+            _lpResults.Clear();
+            _lpSearching = false;
+            _lpBodyKey = string.Empty;
             UpdateChrome();
-            KeyboardEnded?.Invoke();
+            PositionAfterModeChange();
+            return;
+        }
+
+        _lpResults.Clear();
+        _lpSearching = true;
+        _lpBodyKey = string.Empty;
+        UpdateChrome();
+        PositionAfterModeChange();
+        _lpSearchTimer.Stop();
+        _lpSearchTimer.Start();
+    }
+
+    private async Task RunSearchAsync(string rawQuery)
+    {
+        var lpQuery = rawQuery.Trim();
+        if (lpQuery.Length == 0)
+        {
+            return;
+        }
+
+        var lpGeneration = _lpSearchGeneration;
+        IpcReply lpReply;
+        try
+        {
+            lpReply = await PipeClient.SendAsync(
+                Branding.ServicePipeName,
+                new IpcRequest { Command = "SEARCH", Query = lpQuery, Limit = SearchLimit },
+                TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            if (lpGeneration != _lpSearchGeneration)
+            {
+                return;
+            }
+
+            AppLog.Warn($"快速切换搜索失败（{lpQuery}）: {ex.Message}");
+            _lpSearching = false;
+            _lpResults.Clear();
+            _lpBodyKey = string.Empty;
+            UpdateChrome();
+            PositionAfterModeChange();
+            return;
+        }
+
+        if (lpGeneration != _lpSearchGeneration)
+        {
+            return;
+        }
+
+        _lpSearching = false;
+        _lpResults.Clear();
+        if (lpReply.Ok && lpReply.Hits is not null)
+        {
+            foreach (var lpHit in lpReply.Hits)
+            {
+                if (_lpResults.Count >= MaxRows)
+                {
+                    break;
+                }
+
+                _lpResults.Add(lpHit);
+            }
+        }
+
+        _lpResultSelected = _lpResults.Count > 0 ? 0 : -1;
+        _lpBodyKey = string.Empty;
+        UpdateChrome();
+        PositionAfterModeChange();
+        AppLog.Info($"快速切换搜索结果: q={lpQuery} hits={_lpResults.Count} ok={lpReply.Ok} index={lpReply.Index?.State}");
+    }
+
+    private void PositionAfterModeChange()
+    {
+        if (_lpDetached)
+        {
+            PositionDetached();
+        }
+        else
+        {
+            PositionAttached();
         }
     }
 
@@ -558,7 +957,7 @@ public sealed partial class QuickSwitchWindow : Window
     private void OnRecentUpdated()
     {
         LoadFolders();
-        BuildChips();
+        RefreshBody(true);
         UpdateChrome();
     }
 
@@ -613,16 +1012,147 @@ public sealed partial class QuickSwitchWindow : Window
 
     private void ReflowChips(int widthPx)
     {
-        var lpNewColumns = QuickSwitchLayout.Columns(widthPx, _lpScale);
-        if (lpNewColumns != _lpColumns)
+        _lpColumns = _lpSearchMode ? 1 : QuickSwitchLayout.Columns(widthPx, _lpScale);
+        RefreshBody();
+    }
+
+    /// <summary>
+    /// 按当前状态刷新内容区：无输入画最近文件夹网格，有输入画搜索结果列表或空态。
+    /// 内容签名没变时直接返回，避免几何事件每帧重建 XAML（拖动时的闪烁源之一）。
+    /// </summary>
+    private void RefreshBody(bool force = false)
+    {
+        var lpKey = string.Join(
+            '|',
+            _lpSearchMode ? "s" : "r",
+            _lpColumns,
+            _lpFolders.Count,
+            _lpResults.Count,
+            _lpSelected,
+            _lpResultSelected,
+            _lpKeyboardActive ? 1 : 0,
+            _lpSearching ? 1 : 0);
+        if (!force && lpKey == _lpBodyKey)
         {
-            _lpColumns = lpNewColumns;
-            BuildChips();
+            return;
         }
-        else if (ChipsPanel.Children.Count != Math.Min(MaxRows, _lpFolders.Count))
+
+        _lpBodyKey = lpKey;
+
+        if (_lpSearchMode)
         {
-            BuildChips();
+            ChipsPanel.Visibility = Visibility.Collapsed;
+            var lpHasResults = _lpResults.Count > 0;
+            ResultsPanel.Visibility = lpHasResults ? Visibility.Visible : Visibility.Collapsed;
+            EmptyText.Visibility = lpHasResults ? Visibility.Collapsed : Visibility.Visible;
+            if (!lpHasResults)
+            {
+                EmptyText.Text = _lpSearching ? "搜索中…" : "没有匹配的结果 · 试试更短的关键词";
+            }
+
+            BuildResults();
+            return;
         }
+
+        ResultsPanel.Visibility = Visibility.Collapsed;
+        EmptyText.Visibility = Visibility.Collapsed;
+        ChipsPanel.Visibility = Visibility.Visible;
+        BuildChips();
+    }
+
+    private void BuildResults()
+    {
+        ResultsPanel.Children.Clear();
+        var lpCount = Math.Min(MaxRows, _lpResults.Count);
+        for (var lpIndex = 0; lpIndex < lpCount; lpIndex++)
+        {
+            ResultsPanel.Children.Add(BuildResultRow(lpIndex, _lpResults[lpIndex]));
+        }
+    }
+
+    private Border BuildResultRow(int index, SearchHitDto hit)
+    {
+        var lpSelected = index == _lpResultSelected && _lpKeyboardActive;
+        var lpColor = hit.IsDirectory ? FolderColor : FileColor;
+        var lpRow = new Border
+        {
+            Height = 28,
+            Padding = new Thickness(7, 0, 7, 0),
+            CornerRadius = new CornerRadius(7),
+            Background = lpSelected ? ThemeService.Instance.SelectionBrush : ThemeService.Instance.TransparentBrush,
+            BorderBrush = lpSelected ? ThemeService.Instance.SelectionBorderBrush : ThemeService.Instance.TransparentBrush,
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = hit.Path
+        };
+        ToolTipService.SetToolTip(lpRow, hit.Path);
+
+        var lpGrid = new Grid { ColumnSpacing = 8 };
+        lpGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        lpGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        lpGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var lpBadge = new Border
+        {
+            Width = 18,
+            Height = 18,
+            CornerRadius = new CornerRadius(4),
+            Background = new SolidColorBrush(Color.FromArgb(26, lpColor.R, lpColor.G, lpColor.B)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(48, lpColor.R, lpColor.G, lpColor.B)),
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new FontIcon
+            {
+                Glyph = hit.IsDirectory ? "\uE8B7" : "\uE7C3",
+                FontFamily = new FontFamily("Segoe Fluent Icons"),
+                FontSize = 10,
+                Foreground = new SolidColorBrush(lpColor)
+            }
+        };
+
+        var lpName = new TextBlock
+        {
+            Text = hit.Name,
+            FontSize = 10.5,
+            FontWeight = lpSelected ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+            Foreground = ThemeService.Instance.Text1Brush,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 1,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var lpTag = new TextBlock
+        {
+            Text = hit.IsDirectory ? "文件夹" : "文件",
+            FontSize = 9,
+            Foreground = ThemeService.Instance.Text3Brush,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        Grid.SetColumn(lpName, 1);
+        Grid.SetColumn(lpTag, 2);
+        lpGrid.Children.Add(lpBadge);
+        lpGrid.Children.Add(lpName);
+        lpGrid.Children.Add(lpTag);
+        lpRow.Child = lpGrid;
+
+        lpRow.Tapped += (_, args) =>
+        {
+            args.Handled = true;
+            PickResult(index);
+        };
+        if (!lpSelected)
+        {
+            lpRow.PointerEntered += (_, _) => lpRow.Background = ThemeService.Instance.RowHoverBrush;
+            lpRow.PointerExited += (_, _) =>
+            {
+                lpRow.Background = _lpKeyboardActive && index == _lpResultSelected
+                    ? ThemeService.Instance.SelectionBrush
+                    : ThemeService.Instance.TransparentBrush;
+            };
+        }
+
+        return lpRow;
     }
 
     private void BuildChips()
@@ -631,7 +1161,10 @@ public sealed partial class QuickSwitchWindow : Window
         ChipsPanel.ColumnDefinitions.Clear();
         ChipsPanel.RowDefinitions.Clear();
 
-        _lpColumns = QuickSwitchLayout.Columns(_lpBarWidthPx, _lpScale);
+        if (_lpColumns < 1)
+        {
+            _lpColumns = QuickSwitchLayout.Columns(_lpBarWidthPx, _lpScale);
+        }
         for (var lpColumn = 0; lpColumn < _lpColumns; lpColumn++)
         {
             ChipsPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

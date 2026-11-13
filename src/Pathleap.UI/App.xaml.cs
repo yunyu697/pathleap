@@ -683,7 +683,10 @@ public partial class App : Application
 
         foreach (var lpPair in _lpQuickBars)
         {
-            lpPair.Value.SetForegroundActive(lpPair.Key == foreground);
+            // 前台已经落在栏自身（用户点进搜索框）时，它同样算活跃；否则会被误判为后台而隐藏。
+            var lpActive = lpPair.Key == foreground
+                           || (foreground != IntPtr.Zero && lpPair.Value.Handle == foreground);
+            lpPair.Value.SetForegroundActive(lpActive);
         }
     }
 
@@ -720,7 +723,7 @@ public partial class App : Application
             return;
         }
 
-        if (foreground == lpBar.DialogHandle)
+        if (foreground == lpBar.DialogHandle || foreground == lpBar.Handle)
         {
             return;
         }
@@ -911,6 +914,13 @@ public partial class App : Application
 
             case "quick":
                 OpenQuickSwitch();
+                if (!string.IsNullOrEmpty(Program.Startup.QuickType))
+                {
+                    await Task.Delay(700);
+                    var lpQuickBar = Volatile.Read(ref _lpKeyboardBar) ?? _lpDetachedBar;
+                    lpQuickBar?.TypeForTest(Program.Startup.QuickType);
+                }
+
                 break;
 
             case "settings":
