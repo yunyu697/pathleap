@@ -667,8 +667,8 @@ public partial class App : Application
             {
                 if (lpBar.OwnerHandle == handle)
                 {
-                    lpBar.ReorderBelowOwner();
-                    lpBar.ReorderBelowOwnerDelayed();
+                    lpBar.ReorderAboveOwner();
+                    lpBar.ReorderAboveOwnerDelayed();
                     break;
                 }
             }

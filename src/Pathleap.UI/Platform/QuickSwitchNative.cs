@@ -11,6 +11,9 @@ internal static class QuickSwitchNative
     public const int GwlStyle = -16;
     public const int GwlExstyle = -20;
     public const int GwlHwndParent = -8;
+    public const uint GwHwndPrev = 3;
+    public const uint GwOwner = 4;
+    public const uint GaRootOwner = 3;
 
     public const long WsChild = 0x40000000L;
     public const long WsPopup = unchecked((long)0x80000000L);
@@ -35,6 +38,12 @@ internal static class QuickSwitchNative
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr GetParent(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetWindow(IntPtr hwnd, uint command);
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetParent(IntPtr child, IntPtr parent);

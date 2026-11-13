@@ -23,7 +23,7 @@ namespace Pathleap.UI;
 /// 技术选择（实测验证见 docs/quick-switch-attach.md）：SetParent 子窗口在层级/裁剪/随动上天然正确，
 /// 实测也能渲染内容，但文件对话框客户区底部就是「文件名 + 打开/取消」操作行，任何嵌进客户区的栏
 /// 都会遮挡这些控件，与「任何时候不遮挡内容区」冲突；因此改用 owner 窗口：GWLP_HWNDPARENT 指向对话框，
-/// 窗口贴在其底边外侧 2px（下方空间不足时翻到上方），以 WinEvent 事件随动。
+/// 窗口上边缘严丝合缝贴住其底边（间隙 0，下方空间不足时翻到上方，同样是 0 间隙），以 WinEvent + 16ms 轮询随动。
 /// owner 关系保证随对话框最小化隐藏、随其销毁而销毁、z 序只排在对话框之上，不会漂到其他应用前面；
 /// 多个对话框各有一个 owner，天然隔离，键盘只路由给前台对话框对应的那一条。
 /// </summary>
@@ -58,7 +58,6 @@ public sealed partial class QuickSwitchWindow : Window
     private int _lpSearchGeneration;
     private string _lpBodyKey = string.Empty;
     private bool _lpGuideDismissed;
-    private DateTimeOffset _lpFollowUntil;
     private int _lpLastX = int.MinValue;
     private int _lpLastY = int.MinValue;
     private int _lpLastWidth = int.MinValue;
@@ -87,8 +86,8 @@ public sealed partial class QuickSwitchWindow : Window
         _lpSearchTimer.IsRepeating = false;
         _lpSearchTimer.Tick += (_, _) => _ = RunSearchAsync(SearchBox.Text);
 
-        // 拖动/缩放对话框时，WinEvent 会合并位置事件；这里用短时 16ms 跟随窗口补帧，
-        // 几何不变就不调用 SetWindowPos，静止后自动停表。
+        // 拖动/缩放对话框时 WinEvent 会合并事件，也可能整段丢事件（实测连续改尺寸时应用侧一条重排日志都没有）。
+        // 因此贴边期间常驻 16ms 轮询：几何没变就只读不写，静止时只多几次窗口查询，不产生重绘。
         _lpFollowTimer = DispatcherQueue.CreateTimer();
         _lpFollowTimer.Interval = TimeSpan.FromMilliseconds(16);
         _lpFollowTimer.IsRepeating = true;
@@ -162,6 +161,7 @@ public sealed partial class QuickSwitchWindow : Window
         if (active && !QuickSwitchNative.IsIconic(_lpDialog.Handle))
         {
             ShowIfNeeded();
+            EnsureFollowing();
         }
         else
         {
@@ -194,7 +194,7 @@ public sealed partial class QuickSwitchWindow : Window
         _lpLastY = int.MinValue;
         _lpLastWidth = int.MinValue;
         _lpLastHeight = int.MinValue;
-        _lpFollowTimer.Stop();
+        // 不停轮询：轮询同时负责「还原后重新显示」，停了就再也起不来（实测最小化还原后事件不再到达）。
     }
 
     private void ConfigureWindow()
@@ -228,14 +228,18 @@ public sealed partial class QuickSwitchWindow : Window
     private void ApplyTheme()
     {
         RootGrid.RequestedTheme = ThemeService.Instance.ElementTheme;
+        // 客户区整块填满：栏要严丝合缝贴住对话框下边缘，四角不能透出后面的像素（实测「角上白边」）。
+        RootGrid.Background = ThemeService.Instance.SurfaceBrush;
         RootBorder.Background = ThemeService.Instance.SurfaceBrush;
         // 外轮廓只留 DWM 那一圈（见 WindowChrome/NcFrame），XAML 不再叠自绘描边。
         RootBorder.BorderThickness = new Thickness(0);
         RootBorder.BorderBrush = ThemeService.Instance.TransparentBrush;
+        RootBorder.CornerRadius = new CornerRadius(0);
         WindowChrome.Apply(
             this,
             _lpKeyboardActive ? ThemeService.Instance.Accent : ThemeService.Instance.WindowBorderColor,
-            ThemeService.Instance.IsDark);
+            ThemeService.Instance.IsDark,
+            WindowChrome.CornerDoNotRound);
 
         BrandDot.Background = ThemeService.Instance.BrandMarkBrush;
         CountText.Foreground = ThemeService.Instance.Text3Brush;
@@ -314,6 +318,11 @@ public sealed partial class QuickSwitchWindow : Window
             // 首次显示后 WinUI 会按内容重排一次，再贴一次保证尺寸/位置稳定。
             PositionAttached();
         }
+
+        EnsureFollowing();
+        // 首次显示走的是默认插入位置（owner 是建窗之后才设的，所以栏可能落在对话框下面）；
+        // 挂上之后立刻插到对话框之上，空闲态就不依赖后续的前台事件。
+        PlaceDirectlyAboveOwner();
     }
 
     /// <summary>没有文件对话框时的预览形态：挂在主窗口下，贴在屏幕底部中间。</summary>
@@ -335,7 +344,7 @@ public sealed partial class QuickSwitchWindow : Window
             PositionDetached();
         }
 
-        BringToFront();
+        PlaceDirectlyAboveOwner();
     }
 
     /// <summary>对话框移动/缩放/最小化/还原后同步栏的可见性与位置。</summary>
@@ -369,39 +378,27 @@ public sealed partial class QuickSwitchWindow : Window
         }
 
         ShowIfNeeded();
-        StartFollowBurst();
+        EnsureFollowing();
         PositionAttached();
-        // 还原/重新贴边后系统还会把 owned 窗口再抬一次，补两次延后重排压回宿主之下。
-        ReorderBelowOwnerDelayed();
     }
 
-    /// <summary>
-    /// 结束拖动后仍保留一小段跟随窗口，等 WinEvent 的最后一次合并事件落地；期间每 16ms 读一次真实几何。
-    /// </summary>
-    private void StartFollowBurst()
+    /// <summary>贴边期间保持轮询（实测约 31ms 一拍），保证栏的几何收敛到对话框最新边界。</summary>
+    private void EnsureFollowing()
     {
-        _lpFollowUntil = DateTimeOffset.Now.AddMilliseconds(450);
-        if (!_lpFollowTimer.IsRunning)
+        if (!_lpDetached && !_lpFollowTimer.IsRunning)
         {
             _lpFollowTimer.Start();
         }
     }
 
+    /// <summary>
+    /// 一个刷新周期读一次真实几何；位置尺寸没变时 <see cref="PositionAttached"/> 直接返回，
+    /// 不做任何 SetWindowPos，因此静止态没有额外重绘，也不会重排 z 序（TOPMOST 与频繁重插都不用）。
+    /// 这一拍同时兜住事件丢失：实测最小化还原之后该对话框不再送来任何几何事件。
+    /// </summary>
     private void OnFollowTick()
     {
-        if (!_lpShown || _lpDetached)
-        {
-            _lpFollowTimer.Stop();
-            return;
-        }
-
-        if (DateTimeOffset.Now > _lpFollowUntil)
-        {
-            _lpFollowTimer.Stop();
-            return;
-        }
-
-        if (!_lpDialog.IsFileDialog || !QuickSwitchNative.IsWindow(_lpDialog.Handle))
+        if (_lpDetached || !_lpDialog.IsFileDialog || !QuickSwitchNative.IsWindow(_lpDialog.Handle))
         {
             _lpFollowTimer.Stop();
             return;
@@ -413,7 +410,49 @@ public sealed partial class QuickSwitchWindow : Window
             return;
         }
 
+        // 前台归属每一拍都直接从系统读：事件可能整段丢失（实测最小化还原后一条都没到），
+        // 缓存的前台标记一旦停在 true，就会让后台对话框的栏一直压在前面。
+        var lpForeground = QuickSwitchNative.GetForegroundWindow();
+        _lpForegroundActive = IsDialogContextForeground(lpForeground);
+
+        if (!_lpForegroundActive)
+        {
+            HideIfShown();
+            return;
+        }
+
+        ShowIfNeeded();
         PositionAttached();
+    }
+
+    /// <summary>
+    /// 前台是否仍属于这个对话框的上下文：对话框本身、栏自身，或被这个对话框（逐级）拥有的弹出窗口
+    /// （地址栏下拉、右键菜单这类）。不用 root owner 判断：同一个宿主下开两个对话框时 root owner 相同，
+    /// 会让后台那条栏也一直显示（实测多对话框场景里两条栏同时可见）。
+    /// </summary>
+    private bool IsDialogContextForeground(IntPtr foreground)
+    {
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (foreground == _lpDialog.Handle || foreground == _lpHandle)
+        {
+            return true;
+        }
+
+        var lpCursor = foreground;
+        for (int lpDepth = 0; lpDepth < 8 && lpCursor != IntPtr.Zero; lpDepth++)
+        {
+            lpCursor = QuickSwitchNative.GetWindow(lpCursor, QuickSwitchNative.GwOwner);
+            if (lpCursor == _lpDialog.Handle)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void SetOwner(IntPtr owner)
@@ -510,14 +549,16 @@ public sealed partial class QuickSwitchWindow : Window
             _lpLastWidth = lpBar.Width;
             _lpLastHeight = lpBar.Height;
 
+            // 几何和 z 序分开设置：如果把几何和「插到某个窗口之后」放进同一次 SetWindowPos，
+            // 那个参照窗口刚好被销毁时整次调用会失败，栏就会卡住不动（拖动时表现为完全不跟随）。
             QuickSwitchNative.SetWindowPos(
                 _lpHandle,
-                _lpDialog.Handle,
+                IntPtr.Zero,
                 lpBar.X,
                 lpBar.Y,
                 lpBar.Width,
                 lpBar.Height,
-                QuickSwitchNative.SwpNoActivate);
+                QuickSwitchNative.SwpNoActivate | 0x0004 /* SWP_NOZORDER */);
 
             AppLog.Info($"快速切换栏贴边: dialog=({lpFrame.Left},{lpFrame.Top},{lpFrame.Width}x{lpFrame.Height}) " +
                         $"bar=({lpBar.X},{lpBar.Y},{lpBar.Width}x{lpBar.Height}) scale={_lpScale:0.##} folders={_lpFolders.Count} " +
@@ -557,17 +598,43 @@ public sealed partial class QuickSwitchWindow : Window
         }
     }
 
-    /// <summary>把栏放到 owner（对话框/主窗）之后，保证只在它上方一层，不盖到别的应用。</summary>
-    private void BringToFront(bool show = true)
+    /// <summary>
+    /// 栏要插到「宿主正上方那个窗口」的下面，这样栏紧贴宿主正上方、中间没有第三方窗口。
+    /// 宿主已在最上层时返回 Zero，等价 HWND_TOP。
+    /// </summary>
+    private IntPtr GetInsertAfterForOwner()
+    {
+        var lpOwner = _lpOwner != IntPtr.Zero ? _lpOwner : _lpDialog.Handle;
+        return QuickSwitchNative.GetWindow(lpOwner, QuickSwitchNative.GwHwndPrev);
+    }
+
+    /// <summary>
+    /// 把栏插到宿主正上方一层：取宿主当前的上一个窗口，把栏插到那个窗口下面。
+    /// 这样栏与宿主之间不可能有第三方窗口；TOPMOST 会让栏浮到所有程序之上，不采用。
+    /// </summary>
+    private void PlaceDirectlyAboveOwner(bool show = true)
     {
         if (_lpOwner == IntPtr.Zero)
         {
             return;
         }
 
+        var lpAboveOwner = GetInsertAfterForOwner();
+        if (lpAboveOwner != IntPtr.Zero && !QuickSwitchNative.IsWindow(lpAboveOwner))
+        {
+            // 参照窗口在取到之后被销毁时，整次 SetWindowPos 会失败退出，退回 HWND_TOP。
+            lpAboveOwner = IntPtr.Zero;
+        }
+
+        if (lpAboveOwner == _lpHandle)
+        {
+            // 已经紧贴宿主上方，再调一次只会制造无意义的 z 序变动。
+            return;
+        }
+
         QuickSwitchNative.SetWindowPos(
             _lpHandle,
-            _lpOwner,
+            lpAboveOwner,
             0,
             0,
             0,
@@ -582,22 +649,22 @@ public sealed partial class QuickSwitchWindow : Window
     internal IntPtr OwnerHandle => _lpOwner;
 
     /// <summary>
-    /// 宿主被激活时系统会把 owned 窗口抬到宿主之上，导致栏越过盖住对话框的其它窗口。
-    /// 前台一变就重新插回宿主之下，保证栏和对话框始终同一层。
+    /// 宿主被激活时系统会重排 owned 窗口的相对位置，栏可能被别的窗口挤开。
+    /// 前台一变就重新贴回宿主正上方一层。
     /// 这里不能带 SWP_SHOWWINDOW，否则会把宿主最小化时刚藏起来的栏又显示出来。
     /// </summary>
-    internal void ReorderBelowOwner() => BringToFront(false);
+    internal void ReorderAboveOwner() => PlaceDirectlyAboveOwner(false);
 
     /// <summary>
     /// 系统在激活宿主后还会再抬一次 owned 窗口，紧接着的 SetWindowPos 会被它覆盖。
-    /// 再补一次 150ms 后的重排，确保最小化还原、切回宿主等路径也稳定落在宿主之下。
+    /// 再补两次延后重排，确保最小化还原、切回宿主等路径也稳定贴在宿主正上方。
     /// </summary>
-    internal void ReorderBelowOwnerDelayed()
+    internal void ReorderAboveOwnerDelayed()
     {
         foreach (var lpDelay in new[] { 150, 700 })
         {
             _ = Task.Delay(lpDelay).ContinueWith(_ =>
-                DispatcherQueue.TryEnqueue(() => BringToFront(false)));
+                DispatcherQueue.TryEnqueue(() => PlaceDirectlyAboveOwner(false)));
         }
     }
 
@@ -1014,7 +1081,7 @@ public sealed partial class QuickSwitchWindow : Window
 
         // 激活会把栏提到非置顶层的最前面，可能压到盖住对话框的其它窗口上；
         // 立刻按 owner 重新插回「对话框正上方一层」，保证两者始终同层。
-        BringToFront();
+        PlaceDirectlyAboveOwner();
         AppLog.Info($"快速切换栏进入输入模式: foreground=0x{QuickSwitchNative.GetForegroundWindow().ToInt64():X}");
     }
 
