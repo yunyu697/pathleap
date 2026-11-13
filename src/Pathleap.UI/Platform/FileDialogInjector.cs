@@ -75,21 +75,6 @@ internal static class FileDialogInjector
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessageW(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetForegroundWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetFocus(IntPtr hwnd);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool AttachThreadInput(uint attachThread, uint attachToThread, bool attach);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, IntPtr processId);
-
-    [DllImport("kernel32.dll")]
-    private static extern uint GetCurrentThreadId();
-
     private const int DwmwaExtendedFrameBounds = 9;
 
     [DllImport("dwmapi.dll")]
@@ -177,7 +162,6 @@ internal static class FileDialogInjector
         }
 
         SendMessageW(lpEdit, WmSetText, IntPtr.Zero, path);
-        FocusDialog(dialog, lpEdit);
 
         // 只发回车：文件夹路径会被对话框当作「进入该目录」，不会误当作文件确认而关闭；
         // 「选择文件夹」对话框按回车则是选中并关闭，符合预期。额外发 WM_COMMAND(IDOK)
@@ -277,37 +261,6 @@ internal static class FileDialogInjector
         }
 
         return false;
-    }
-
-    private static void FocusDialog(IntPtr dialog, IntPtr edit)
-    {
-        var lpCurrent = GetCurrentThreadId();
-        var lpForeground = GetForegroundWindow();
-        var lpForegroundThread = GetWindowThreadProcessId(lpForeground, IntPtr.Zero);
-        var lpDialogThread = GetWindowThreadProcessId(dialog, IntPtr.Zero);
-
-        var lpAttachedForeground = lpCurrent != lpForegroundThread
-                                   && AttachThreadInput(lpCurrent, lpForegroundThread, true);
-        var lpAttachedDialog = lpCurrent != lpDialogThread
-                               && AttachThreadInput(lpCurrent, lpDialogThread, true);
-        try
-        {
-            SetForegroundWindow(dialog);
-            SetFocus(edit);
-            Thread.Sleep(20);
-        }
-        finally
-        {
-            if (lpAttachedDialog)
-            {
-                AttachThreadInput(lpCurrent, lpDialogThread, false);
-            }
-
-            if (lpAttachedForeground)
-            {
-                AttachThreadInput(lpCurrent, lpForegroundThread, false);
-            }
-        }
     }
 
     private static string ClassName(IntPtr hwnd)

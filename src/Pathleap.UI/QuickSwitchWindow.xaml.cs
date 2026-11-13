@@ -117,7 +117,7 @@ public sealed partial class QuickSwitchWindow : Window
     {
         if (args.DidVisibilityChange && sender.IsVisible && !_lpDetached && !_lpForegroundActive)
         {
-            QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
+            HideIfShown();
         }
     }
 
@@ -144,8 +144,37 @@ public sealed partial class QuickSwitchWindow : Window
         _lpForegroundActive = active;
 
         // 最小化的对话框即使仍处于前台也不显示栏：栏会停在最小化前的坐标上，浮在桌面。
-        var lpShow = active && !QuickSwitchNative.IsIconic(_lpDialog.Handle);
-        QuickSwitchNative.ShowWindow(_lpHandle, lpShow ? QuickSwitchNative.SwShowNoActivate : QuickSwitchNative.SwHide);
+        if (active && !QuickSwitchNative.IsIconic(_lpDialog.Handle))
+        {
+            ShowIfNeeded();
+        }
+        else
+        {
+            HideIfShown();
+        }
+    }
+
+    /// <summary>可见性只在真正变化时调用 ShowWindow，避免几何事件里反复隐藏/显示造成闪烁。</summary>
+    private void ShowIfNeeded()
+    {
+        if (_lpShown || !QuickSwitchNative.IsWindow(_lpHandle))
+        {
+            return;
+        }
+
+        QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwShowNoActivate);
+        _lpShown = true;
+    }
+
+    private void HideIfShown()
+    {
+        if (!_lpShown || !QuickSwitchNative.IsWindow(_lpHandle))
+        {
+            return;
+        }
+
+        QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
+        _lpShown = false;
     }
 
     private void ConfigureWindow()
@@ -289,25 +318,20 @@ public sealed partial class QuickSwitchWindow : Window
         // 对话框最小化时，栏随其一起收起；还原后再贴回底边。
         if (QuickSwitchNative.IsIconic(_lpDialog.Handle))
         {
-            if (_lpShown)
-            {
-                QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
-                _lpShown = false;
-            }
-
+            HideIfShown();
             return;
         }
-
-        _lpShown = true;
 
         // 还原时系统会把 owner 的附属窗口一并自动显示出来，所以这里要按前台状态再套用一次可见性，
         // 而不是只在「从隐藏转为显示」时判断，否则后台对话框被还原（不激活）会把栏也带出来，
         // 绕过「只显示前台那条」的约定。
         if (!_lpForegroundActive)
         {
-            QuickSwitchNative.ShowWindow(_lpHandle, QuickSwitchNative.SwHide);
+            HideIfShown();
+            return;
         }
 
+        ShowIfNeeded();
         PositionAttached();
     }
 
@@ -400,7 +424,7 @@ public sealed partial class QuickSwitchWindow : Window
                 lpBar.Y,
                 lpBar.Width,
                 lpBar.Height,
-                QuickSwitchNative.SwpNoActivate | (_lpForegroundActive ? QuickSwitchNative.SwpShowWindow : 0));
+                QuickSwitchNative.SwpNoActivate);
 
             AppLog.Info($"快速切换栏贴边: dialog=({lpFrame.Left},{lpFrame.Top},{lpFrame.Width}x{lpFrame.Height}) " +
                         $"bar=({lpBar.X},{lpBar.Y},{lpBar.Width}x{lpBar.Height}) scale={_lpScale:0.##} folders={_lpFolders.Count} " +
