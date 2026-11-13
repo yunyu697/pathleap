@@ -1,8 +1,8 @@
 namespace Pathleap.UI.Platform;
 
 /// <summary>
-/// 快速切换栏的纯几何计算：宽度取对话框一半、贴在底边外侧 2 DIP、水平居中、不越出工作区，
-/// 下方放不下时翻到上方。抽成无窗口依赖的纯函数，便于在非整数缩放（125%/150%）下
+/// 快速切换栏的纯几何计算：宽度取对话框一半、上边缘紧贴对话框下边缘（间隙 0）、水平居中、不越出工作区，
+/// 下方放不下时翻到上方（同样 0 间隙）。抽成无窗口依赖的纯函数，便于在非整数缩放（125%/150%）下
 /// 用 --layout-probe 逐项核对，而不必真的改系统缩放。
 /// </summary>
 internal static class QuickSwitchLayout
@@ -26,8 +26,11 @@ internal static class QuickSwitchLayout
     /// </summary>
     public const double NarrowColumnsMaxDip = 360;
 
-    /// <summary>栏与对话框之间的视觉间距（DIP）。</summary>
-    public const double GapDip = 2;
+    /// <summary>
+    /// 栏与对话框之间的视觉间距（DIP）。用户要求严丝合缝贴住下边缘，因此为 0；
+    /// 位置取 DWM 可视外框（不含阴影与不可见缩放边框），而不是 GetWindowRect。
+    /// </summary>
+    public const double GapDip = 0;
 
     internal readonly record struct BarRect(int X, int Y, int Width, int Height, int Columns);
 
@@ -84,8 +87,10 @@ internal static class QuickSwitchLayout
 
         var lpX = frame.Left + (frame.Width - lpWidth) / 2;
 
-        var lpBottom = hasWindowRect ? Math.Max(frame.Bottom, windowRect.Bottom) : frame.Bottom;
-        var lpTop = hasWindowRect ? Math.Min(frame.Top, windowRect.Top) : frame.Top;
+        // 只用 DWM 可视外框：GetWindowRect 会把对话框的投影阴影也算进去，
+        // 按它贴边会留下一条与阴影等宽的视觉缝。
+        var lpBottom = frame.Bottom;
+        var lpTop = frame.Top;
         var lpY = lpBottom + (int)Math.Round(GapDip * lpScale);
 
         if (hasWork)

@@ -357,11 +357,12 @@ internal static class LayoutProbe
         var lpBar = QuickSwitchLayout.Attach(dialog.Frame, dialog.WindowRect, true, work, true, scale, folderCount);
         var lpExpectedGap = (int)Math.Round(QuickSwitchLayout.GapDip * scale);
         var lpExpectedColumns = QuickSwitchLayout.Columns(lpBar.Width, scale);
-        var lpBottom = Math.Max(dialog.Frame.Bottom, dialog.WindowRect.Bottom);
+        var lpBottom = dialog.Frame.Bottom;
         var lpFrameCenter = dialog.Frame.Left + dialog.Frame.Width / 2.0;
         var lpBarCenter = lpBar.X + lpBar.Width / 2.0;
 
         var lpAtBottom = lpBar.Y == lpBottom + lpExpectedGap;
+        var lpFlipped = lpBar.Y < dialog.Frame.Top;
         var lpInsideWork = lpBar.X >= work.Left && lpBar.X + lpBar.Width <= work.Right
                            && lpBar.Y >= work.Top && lpBar.Y + lpBar.Height <= work.Bottom;
 
@@ -375,13 +376,14 @@ internal static class LayoutProbe
             checks = new
             {
                 halfWidth = Math.Abs(lpBar.Width - dialog.Frame.Width / 2.0) <= 1,
-                gapPx = lpAtBottom ? lpExpectedGap : (int?)null,
-                gapMatches = lpAtBottom ? Math.Abs(lpBar.Y - lpBottom) <= lpExpectedGap : (bool?)null,
+                gapPx = lpBar.Y - (lpFlipped ? dialog.Frame.Top - lpBar.Height : lpBottom),
+                gapMatches = lpBar.Y - (lpFlipped ? dialog.Frame.Top - lpBar.Height : lpBottom) == lpExpectedGap,
                 centerOffsetPx = Math.Round(lpBarCenter - lpFrameCenter, 2),
                 centered = Math.Abs(lpBarCenter - lpFrameCenter) <= 1,
                 columns = lpExpectedColumns,
                 insideWorkArea = lpInsideWork,
-                flippedAbove = lpBar.Y < dialog.Frame.Top
+                attachedAtBottom = lpAtBottom,
+                flippedAbove = lpFlipped
             }
         };
     }
