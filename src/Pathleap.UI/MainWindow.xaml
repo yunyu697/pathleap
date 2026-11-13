@@ -28,11 +28,14 @@
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
         </Grid.Resources>
+        <!-- 圆角统一 8 DIP，只由 DWM 裁剪（DWMWCP_ROUND），XAML 不再画第二套圆角：
+             窗口没有逐像素透明，自绘圆角与 DWM 裁剪的半径不一致时，两弧之间会露出窗口底色。
+             所以客户区整块铺满，圆角交给系统。 -->
         <Border x:Name="RootBorder"
                 Background="#EB171A21"
                 BorderBrush="{ThemeResource Border2Brush}"
                 BorderThickness="0"
-                CornerRadius="14">
+                CornerRadius="0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -307,7 +310,7 @@
                         Background="{ThemeResource Surface2Brush}"
                         BorderBrush="{ThemeResource Border1Brush}"
                         BorderThickness="0,1,0,0"
-                        CornerRadius="0,0,14,14">
+                        CornerRadius="0,0,8,8">
                     <Grid Padding="16,0">
                         <StackPanel Orientation="Horizontal"
                                     VerticalAlignment="Center"
@@ -406,7 +409,7 @@
                       Background="#F20C0E12">
                     <Border MaxWidth="440"
                             Padding="26,22"
-                            CornerRadius="14"
+                            CornerRadius="8"
                             VerticalAlignment="Center"
                             Background="{ThemeResource SurfaceRaisedBrush}"
                             BorderBrush="{ThemeResource Border2Brush}"

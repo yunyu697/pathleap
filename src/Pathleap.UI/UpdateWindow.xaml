@@ -32,7 +32,7 @@
                 Background="{ThemeResource SurfaceBrush}"
                 BorderBrush="{ThemeResource Border2Brush}"
                 BorderThickness="0"
-                CornerRadius="12">
+                CornerRadius="0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="40" />

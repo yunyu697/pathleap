@@ -228,18 +228,21 @@ public sealed partial class QuickSwitchWindow : Window
     private void ApplyTheme()
     {
         RootGrid.RequestedTheme = ThemeService.Instance.ElementTheme;
-        // 客户区整块填满：栏要严丝合缝贴住对话框下边缘，四角不能透出后面的像素（实测「角上白边」）。
+        // 客户区整块填满不透明的面面色：圆角交给 DWM 裁剪，窗口本身没有逐像素透明，
+        // 客户区没画到的地方会露出窗口白底，就是实测的「角上白边」。
         RootGrid.Background = ThemeService.Instance.SurfaceBrush;
         RootBorder.Background = ThemeService.Instance.SurfaceBrush;
-        // 外轮廓只留 DWM 那一圈（见 WindowChrome/NcFrame），XAML 不再叠自绘描边。
         RootBorder.BorderThickness = new Thickness(0);
         RootBorder.BorderBrush = ThemeService.Instance.TransparentBrush;
         RootBorder.CornerRadius = new CornerRadius(0);
+        // DWM 负责圆角（与主窗同一种裁剪，圆角半径也一致），描边关掉：
+        // 描边按窗口矩形画方角，会在圆角外露出一圈浅色边，正是「角上白边」的另一半来源。
         WindowChrome.Apply(
             this,
             _lpKeyboardActive ? ThemeService.Instance.Accent : ThemeService.Instance.WindowBorderColor,
             ThemeService.Instance.IsDark,
-            WindowChrome.CornerDoNotRound);
+            WindowChrome.CornerRound,
+            drawBorder: false);
 
         BrandDot.Background = ThemeService.Instance.BrandMarkBrush;
         CountText.Foreground = ThemeService.Instance.Text3Brush;
@@ -382,7 +385,7 @@ public sealed partial class QuickSwitchWindow : Window
         PositionAttached();
     }
 
-    /// <summary>贴边期间保持轮询（实测约 31ms 一拍），保证栏的几何收敛到对话框最新边界。</summary>
+    /// <summary>贴边期间保持轮询（实测约 31ms 一拍）：只负责可见性与 z 序自愈，不参与跟随定位。</summary>
     private void EnsureFollowing()
     {
         if (!_lpDetached && !_lpFollowTimer.IsRunning)
@@ -392,9 +395,10 @@ public sealed partial class QuickSwitchWindow : Window
     }
 
     /// <summary>
-    /// 一个刷新周期读一次真实几何；位置尺寸没变时 <see cref="PositionAttached"/> 直接返回，
-    /// 不做任何 SetWindowPos，因此静止态没有额外重绘，也不会重排 z 序（TOPMOST 与频繁重插都不用）。
-    /// 这一拍同时兜住事件丢失：实测最小化还原之后该对话框不再送来任何几何事件。
+    /// 一个刷新周期做一次「可见性 + z 序」自愈，不碰位置尺寸：
+    /// 几何完全由 <c>DialogGeometryChanged</c> 事件驱动（与对话框同一帧调用 <see cref="PositionAttached"/>）。
+    /// 轮询这里只兜两种事件不可靠的情况：最小化还原后对话框不再送几何事件（只管把栏显示回来），
+    /// 以及宿主重新激活时系统把 owned 栏抬到别处（插回对话框正上方）。
     /// </summary>
     private void OnFollowTick()
     {
@@ -422,7 +426,24 @@ public sealed partial class QuickSwitchWindow : Window
         }
 
         ShowIfNeeded();
-        PositionAttached();
+
+        // 位置尺寸由对话框的几何事件（Reposition）驱动，与对话框同一帧完成；
+        // 轮询只做 z 序自愈，不参与跟随定位，避免 31ms 节拍在连续改尺寸时拖出可见偏差。
+        EnsureAboveDialog();
+    }
+
+    /// <summary>
+    /// 栏必须紧贴对话框正上方：取对话框当前的上一个窗口，不是栏就插回去。
+    /// 只在被系统抬走时动手，空闲态不做任何 SetWindowPos。
+    /// </summary>
+    private void EnsureAboveDialog()
+    {
+        if (QuickSwitchNative.GetWindow(_lpDialog.Handle, QuickSwitchNative.GwHwndPrev) == _lpHandle)
+        {
+            return;
+        }
+
+        PlaceDirectlyAboveOwner(false);
     }
 
     /// <summary>
@@ -536,13 +557,16 @@ public sealed partial class QuickSwitchWindow : Window
             _lpBarWidthPx = lpBar.Width;
             _lpBarHeightPx = lpBar.Height;
             _lpColumns = lpBar.Columns;
-            RefreshBody();
 
             if (lpBar.X == _lpLastX && lpBar.Y == _lpLastY &&
                 lpBar.Width == _lpLastWidth && lpBar.Height == _lpLastHeight)
             {
+                // 几何没变就不重排内容：连续改尺寸时事件每帧都到，这里省掉重复的排版工作。
                 return;
             }
+
+            // 只在宽高变化时重排内容（列数由宽度决定）。
+            RefreshBody();
 
             _lpLastX = lpBar.X;
             _lpLastY = lpBar.Y;

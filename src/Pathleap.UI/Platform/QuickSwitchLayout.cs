@@ -1,8 +1,8 @@
 namespace Pathleap.UI.Platform;
 
 /// <summary>
-/// 快速切换栏的纯几何计算：宽度取对话框一半、上边缘紧贴对话框下边缘（间隙 0）、水平居中、不越出工作区，
-/// 下方放不下时翻到上方（同样 0 间隙）。抽成无窗口依赖的纯函数，便于在非整数缩放（125%/150%）下
+/// 快速切换栏的纯几何计算：宽度取对话框一半、上边缘在对话框可视下边之下留 <see cref="GapDip"/> 间距、水平居中、
+/// 不越出工作区，下方放不下时翻到上方（同样留间距）。抽成无窗口依赖的纯函数，便于在非整数缩放（125%/150%）下
 /// 用 --layout-probe 逐项核对，而不必真的改系统缩放。
 /// </summary>
 internal static class QuickSwitchLayout
@@ -27,10 +27,12 @@ internal static class QuickSwitchLayout
     public const double NarrowColumnsMaxDip = 360;
 
     /// <summary>
-    /// 栏与对话框之间的视觉间距（DIP）。用户要求严丝合缝贴住下边缘，因此为 0；
-    /// 位置取 DWM 可视外框（不含阴影与不可见缩放边框），而不是 GetWindowRect。
+    /// 栏与对话框之间的视觉间距（DIP）。
+    /// 依据：设计稿的组件间距取 8 的倍数（面板内边距 18/20、行间距 6/8），栏与对话框是「同组但不同层」的两个面板，
+    /// 取最小的一档组间距 8 DIP；8 DIP 也大于 DWM 不可见缩放边框（200% 下 4px = 2 DIP），
+    /// 所以代码间距与视觉间距一致，而且能把对话框底边的缩放热区完整让出来（用户要能抓到底边中点）。
     /// </summary>
-    public const double GapDip = 0;
+    public const double GapDip = 8;
 
     internal readonly record struct BarRect(int X, int Y, int Width, int Height, int Columns);
 

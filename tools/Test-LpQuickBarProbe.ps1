@@ -372,9 +372,12 @@ Invoke-LpSeamCapture 'pre'
 # ---------- 8. 连续改尺寸：可见性变化 / 位置序列 / 每帧贴边偏差 ----------
 Write-Lp ''
 Write-Lp '--- [8] 连续改尺寸（60Hz×2s，1ms 级采样）---'
-$LpDragOut = & $LpProbe 'dragresize' "$([int64]$LpBar1)" "$([int64]$LpDlg1)" '120' '16' 2>&1
+$LpGapPreBar = Get-LpBounds $LpBar1
+$LpGapPreDlg = Get-LpBounds $LpDlg1
+$LpDesignGapPx = [int]($LpGapPreBar.T - $LpGapPreDlg.B)
+$LpDragOut = & $LpProbe 'dragresize' "$([int64]$LpBar1)" "$([int64]$LpDlg1)" '120' '16' "$LpDesignGapPx" 2>&1
 $LpDragOut | ForEach-Object { $script:LpLines.Add([string]$_) }
-Write-Lp ('连续改尺寸摘要: {0}' -f (($LpDragOut | Select-String -Pattern 'DRAGSUMMARY|SETTLE' | ForEach-Object { $_.Line }) -join ' / '))
+Write-Lp ('连续改尺寸摘要: {0}' -f (($LpDragOut | Select-String -Pattern 'DRAGSUMMARY|DRAGDIST|SETTLE' | ForEach-Object { $_.Line }) -join ' / '))
 Write-Lp ('可见性变化明细: {0}' -f (($LpDragOut | Select-String -Pattern '^V|^Z ' | Measure-Object).Count))
 
 # ---------- 9. 拖动后再取一次，确认改尺寸结束后接缝与四角没被破坏 ----------

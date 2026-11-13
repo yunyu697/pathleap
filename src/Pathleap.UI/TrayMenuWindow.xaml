@@ -8,7 +8,7 @@
                 Background="{ThemeResource SurfaceBrush}"
                 BorderBrush="{ThemeResource Border2Brush}"
                 BorderThickness="0"
-                CornerRadius="9">
+                CornerRadius="0">
             <StackPanel x:Name="ItemsPanel" Padding="5,5,5,5" Spacing="1" />
         </Border>
         <Button x:Name="KeySink"

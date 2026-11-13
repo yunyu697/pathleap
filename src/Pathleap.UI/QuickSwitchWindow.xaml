@@ -3,9 +3,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 <Grid x:Name="RootGrid">
-    <!-- 快速切换栏：吸附在文件对话框底边，半宽居中；无输入时是最近文件夹，有输入时是搜索结果。
-         背景与圆角都由代码按主题设置：客户区必须整块填满且不做圆角，
-         否则贴住对话框下边缘后四角会透出后面的像素（实测「角上白边」）。 -->
+    <!-- 快速切换栏：吸附在文件对话框下边缘外侧，半宽居中；无输入时是最近文件夹，有输入时是搜索结果。
+         圆角由 DWM 裁剪（DWMWCP_ROUND，与主窗一致），所以客户区必须整块填满不透明的面面色：
+         窗口没有逐像素透明，客户区留空的地方会露出窗口自身的白底，就是实测的「角上白边」。
+         DWM 描边关掉，避免在圆角外再画一圈方角浅色描边。 -->
     <Border x:Name="RootBorder"
             BorderThickness="0">
         <Grid Padding="12,9,12,9" RowSpacing="6">

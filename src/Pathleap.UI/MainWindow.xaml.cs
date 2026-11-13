@@ -170,7 +170,7 @@ public sealed partial class MainWindow : Window
         RootBorder.Background = _lpTheme.AcrylicEnabled
             ? _lpTheme.WindowBackgroundBrush
             : _lpTheme.SurfaceBrush;
-        RootBorder.CornerRadius = new CornerRadius(14);
+        RootBorder.CornerRadius = new CornerRadius(0);
 
         BrandDot.Background = _lpTheme.BrandMarkBrush;
 
