@@ -16,12 +16,12 @@ internal static class LayoutProbe
     private const double DesignDialogHeightDip = 480;
     private const double NarrowDialogWidthDip = 280;
     private const double NarrowDialogHeightDip = 360;
+    private const double MainWindowHeightDip = 436;
 
     private static readonly double[] Scales = { 1.0, 1.25, 1.5, 2.0 };
 
     private static readonly (string Name, int WidthDip, int HeightDip)[] Windows =
     {
-        ("main", 660, 436),
         ("settings", 840, 640),
         ("update", 440, 300),
         ("about", 380, 236)
@@ -84,6 +84,7 @@ internal static class LayoutProbe
                     }).ToArray(),
                     cases = Scenarios(scale, lpLogicalWork)
                 }).ToArray(),
+                mainWindow = MainWindowCases(lpLogicalWork),
                 multiMonitor = MultiMonitor()
             };
 
@@ -151,6 +152,54 @@ internal static class LayoutProbe
         });
 
         return lpResults.ToArray();
+    }
+
+    /// <summary>
+    /// 主搜索窗几何：宽度 = 工作区宽度的一半（窄屏退到下限），顶边 = 工作区高度的 1/4，
+    /// 水平居中。按各缩放档与合成三屏分别给出物理像素，供布局改动留档。
+    /// </summary>
+    private static object MainWindowCases(LogicalRect work)
+    {
+        return new
+        {
+            widthFraction = MainWindowLayout.WidthFraction,
+            topFraction = MainWindowLayout.TopFraction,
+            minWidthDip = MainWindowLayout.MinWidthDip,
+            heightDip = MainWindowHeightDip,
+            perScale = Scales.Select(scale => MainWindowCase($"scale-{scale:0.##}", work, scale)).ToArray(),
+            perMonitor = MultiMonitors()
+                .Select(lpMonitor => MainWindowCase(lpMonitor.Name, ToLogical(lpMonitor.Work, lpMonitor.Scale), lpMonitor.Scale))
+                .ToArray(),
+            // 窄屏下限：1024 DIP 工作区按一半只有 512 DIP，低于 560 DIP 下限，验证退到下限后仍居中且不超出工作区。
+            narrowFloor = MainWindowCase("narrow-1024x768", new LogicalRect(0, 0, 1024, 768), 1.0)
+        };
+    }
+
+    private static object MainWindowCase(string name, LogicalRect work, double scale)
+    {
+        var lpPixelWork = ToPixel(work, scale);
+        var lpFrame = MainWindowLayout.Compute(
+            lpPixelWork.Left, lpPixelWork.Top, lpPixelWork.Right, lpPixelWork.Bottom, scale, MainWindowHeightDip);
+        var lpWorkWidth = lpPixelWork.Right - lpPixelWork.Left;
+        var lpWorkHeight = lpPixelWork.Bottom - lpPixelWork.Top;
+        var lpExpectedWidthDip = Math.Min(work.Width, Math.Max(MainWindowLayout.MinWidthDip, work.Width * MainWindowLayout.WidthFraction));
+
+        return new
+        {
+            name,
+            scale,
+            work = ToObject(lpPixelWork),
+            frame = new { x = lpFrame.X, y = lpFrame.Y, width = lpFrame.Width, height = lpFrame.Height },
+            checks = new
+            {
+                widthDip = Math.Round(lpExpectedWidthDip, 2),
+                widthRatio = Math.Round(lpFrame.Width / (double)lpWorkWidth, 4),
+                topRatio = Math.Round((lpFrame.Y - lpPixelWork.Top) / (double)lpWorkHeight, 4),
+                centerOffsetPx = Math.Round(lpFrame.X + lpFrame.Width / 2.0 - (lpPixelWork.Left + lpWorkWidth / 2.0), 2),
+                insideWorkArea = lpFrame.X >= lpPixelWork.Left && lpFrame.X + lpFrame.Width <= lpPixelWork.Right
+                                 && lpFrame.Y >= lpPixelWork.Top && lpFrame.Y + lpFrame.Height <= lpPixelWork.Bottom
+            }
+        };
     }
 
     private readonly record struct MonitorSpec(string Name, double Scale, NativeMethods.Rect Work);

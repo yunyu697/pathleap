@@ -26,8 +26,7 @@ public sealed class AppConfig
     /// <summary>窗口失焦是否自动隐藏。</summary>
     public bool HideOnDeactivate { get; set; } = true;
 
-    public int WindowWidth { get; set; } = 660;
-
+    /// <summary>主搜索窗高度（DIP）；宽度随光标所在显示器工作区宽度的一半动态计算。</summary>
     public int WindowHeight { get; set; } = 436;
 
     /// <summary>主题：System / Light / Dark。</summary>
@@ -101,7 +100,6 @@ public sealed class AppConfig
             QuickSwitchHotkey = "Ctrl+G";
         }
 
-        WindowWidth = Math.Clamp(WindowWidth, 560, 900);
         WindowHeight = Math.Clamp(WindowHeight, 320, 700);
         BenchSamples = Math.Clamp(BenchSamples, 20, 2000);
 

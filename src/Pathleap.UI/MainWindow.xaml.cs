@@ -461,12 +461,11 @@ public sealed partial class MainWindow : Window
             }
 
             var lpScale = lpDpi / 96.0;
-            var lpWidth = (int)Math.Round(_lpConfig.WindowWidth * lpScale);
-            var lpHeight = (int)Math.Round(_lpConfig.WindowHeight * lpScale);
             var lpWork = lpInfo.Work;
-            var lpX = lpWork.Left + (lpWork.Right - lpWork.Left - lpWidth) / 2;
-            var lpY = lpWork.Top + (int)Math.Round((lpWork.Bottom - lpWork.Top) * 0.2);
-            AppWindow.MoveAndResize(new RectInt32(lpX, lpY, lpWidth, lpHeight));
+            // 宽度取工作区一半、顶边落在工作区 1/4 处；高度沿用配置值不变。
+            var lpFrame = MainWindowLayout.Compute(
+                lpWork.Left, lpWork.Top, lpWork.Right, lpWork.Bottom, lpScale, _lpConfig.WindowHeight);
+            AppWindow.MoveAndResize(new RectInt32(lpFrame.X, lpFrame.Y, lpFrame.Width, lpFrame.Height));
         }
         catch (Exception ex)
         {
