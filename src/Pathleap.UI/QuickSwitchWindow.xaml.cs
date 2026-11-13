@@ -72,6 +72,7 @@ public sealed partial class QuickSwitchWindow : Window
         Title = $"{Branding.DisplayName} 快速切换";
         _lpHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         ConfigureWindow();
+        NcFrame.Apply(this);
 
         _lpSearchTimer = DispatcherQueue.CreateTimer();
         _lpSearchTimer.Interval = TimeSpan.FromMilliseconds(140);
@@ -179,10 +180,13 @@ public sealed partial class QuickSwitchWindow : Window
     {
         RootGrid.RequestedTheme = ThemeService.Instance.ElementTheme;
         RootBorder.Background = ThemeService.Instance.SurfaceBrush;
-        RootBorder.BorderBrush = _lpKeyboardActive
-            ? ThemeService.Instance.AccentBrush
-            : ThemeService.Instance.Border1Brush;
-        RootBorder.BorderThickness = new Thickness(_lpKeyboardActive ? 1.5 : 1);
+        // 外轮廓只留 DWM 那一圈（见 WindowChrome/NcFrame），XAML 不再叠自绘描边。
+        RootBorder.BorderThickness = new Thickness(0);
+        RootBorder.BorderBrush = ThemeService.Instance.TransparentBrush;
+        WindowChrome.Apply(
+            this,
+            _lpKeyboardActive ? ThemeService.Instance.Accent : ThemeService.Instance.WindowBorderColor,
+            ThemeService.Instance.IsDark);
 
         BrandDot.Background = ThemeService.Instance.BrandMarkBrush;
         TitleText.Foreground = ThemeService.Instance.Text1Brush;

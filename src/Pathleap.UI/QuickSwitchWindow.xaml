@@ -6,7 +6,7 @@
     <!-- 快速切换栏：吸附在文件对话框底边，半宽居中；无输入时是最近文件夹，有输入时是搜索结果。 -->
     <Border x:Name="RootBorder"
             CornerRadius="10"
-            BorderThickness="1">
+            BorderThickness="0">
         <Grid Padding="12,7,12,8" RowSpacing="5">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
