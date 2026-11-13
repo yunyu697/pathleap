@@ -132,7 +132,7 @@ Add-LpCheck -LpName '索引状态可读' -LpPassed ($null -ne $LpIndexStatus.ind
 Add-LpCheck -LpName '配置文件存在' -LpPassed (Test-Path -LiteralPath $LpConfigFile) -LpDetail $LpConfigFile
 if (Test-Path -LiteralPath $LpConfigFile) {
     $LpConfig = Get-Content -LiteralPath $LpConfigFile -Raw | ConvertFrom-Json
-    Add-LpCheck -LpName '配置包含热键与窗口尺寸' -LpPassed ($null -ne $LpConfig.uiHotkey -and $null -ne $LpConfig.windowWidth) -LpDetail ("uiHotkey=" + $LpConfig.uiHotkey + ", window=" + $LpConfig.windowWidth + 'x' + $LpConfig.windowHeight)
+    Add-LpCheck -LpName '配置包含热键与窗口高度' -LpPassed ($null -ne $LpConfig.uiHotkey -and $null -ne $LpConfig.windowHeight) -LpDetail ("uiHotkey=" + $LpConfig.uiHotkey + ", windowHeight=" + $LpConfig.windowHeight)
 }
 
 Add-LpCheck -LpName 'UI 日志已写入' -LpPassed (Test-Path -LiteralPath $LpUiLog) -LpDetail $LpUiLog

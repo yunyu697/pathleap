@@ -88,6 +88,7 @@
 <nav class="toc">
   <a href="#main-recent">主窗 · 最近访问</a>
   <a href="#main-results">主窗 · 搜索结果</a>
+  <a href="#main-size-108">主窗 · 尺寸与位置（1.0.8）</a>
   <a href="#quick">快速切换浮层</a>
   <a href="#appearance">设置 · 外观与主题</a>
   <a href="#shortcuts">设置 · 快捷键</a>
@@ -105,6 +106,7 @@
 <div class="callout warn">
   <b>截图通道说明：</b>主窗与浅色主题（01/02/04/06/14/15）用 <code>CopyFromScreen</code> 采集，忠实包含 DWM 边框与阴影；
   之后工作站锁屏，桌面截图只能得到锁屏画面，故 03/05/07/08–13 改用 <code>PrintWindow</code> 抓取客户区内容。
+  39–47 用 <code>BitBlt(CAPTUREBLT)</code> + <code>DWMWA_EXTENDED_FRAME_BOUNDS</code> 按物理像素采集。
   PrintWindow 不经过 DWM 合成，非客户区边框会绘制成 1px 系统白线——那是通道伪影，<b>不用于边框层数判断</b>。
 </div>
 
@@ -152,6 +154,30 @@
     <tr><td>2</td><td>选中行底色 + 行尾 ↵ 键帽</td><td>强调色渐变底 + 1px 高亮描边；标签右侧 ↵</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
     <tr><td>3</td><td>来源标签：文件 / 文件夹 / 程序</td><td>同名标签 + 按类型着色图标</td><td>—</td><td><span class="status ok">已解决</span></td></tr>
     <tr><td>4</td><td>底部键位提示</td><td>↑↓ 选择 / ↵ 打开 / Esc 隐藏</td><td>Tab 切换范围未接入，未展示</td><td><span class="status diff">已知差异</span></td></tr>
+  </table>
+</section>
+
+<!-- 2b: 1.0.8 主窗尺寸与位置 -->
+<section id="main-size-108">
+  <div class="screen-tag">1.0.8 · Layout change</div>
+  <h2>主搜索窗口 · 尺寸与位置（200% / 100%）</h2>
+  <p class="lead">按 2026-11-13 需求：宽度改为光标所在显示器工作区的一半，顶边固定在工作区高度 1/4，水平仍居中；高度保持 436 DIP。
+    实拍用 <code>BitBlt(CAPTUREBLT)</code> + <code>DWMWA_EXTENDED_FRAME_BOUNDS</code>，缩放经 <code>--layout-probe</code> 闸门确认。</p>
+  <div class="compare">
+    <div class="pane">
+      <div class="cap"><span>实机 <b>45-main-scale200-results.png</b></span><span>200% · 1440 / 2880 = 0.5</span></div>
+      <div class="frame"><img src="shots/45-main-scale200-results.png" alt="实机：200% 结果页" /></div>
+    </div>
+    <div class="pane">
+      <div class="cap"><span>实机 <b>47-main-scale100-results.png</b></span><span>100% · 1440 / 2880 = 0.5</span></div>
+      <div class="frame"><img src="shots/47-main-scale100-results.png" alt="实机：100% 结果页" /></div>
+    </div>
+  </div>
+  <table>
+    <tr><th>#</th><th>设计稿要求</th><th>当前实现（1.0.8）</th><th>差距</th><th>状态</th></tr>
+    <tr><td>1</td><td>弹窗 660 × 436、近似垂直居中</td><td>宽度 = 光标屏工作区一半，顶边 = 工作区 1/4，高度 436 DIP</td><td>与设计稿的固定宽度/纵向位置不同，属用户指定的新规则</td><td><span class="status diff">已知差异（按新需求）</span></td></tr>
+    <tr><td>2</td><td>—</td><td>200%：宽比 0.5、顶比 0.25、居中偏差 0；100%：同比例</td><td>125%/150% 未实拍，探针数值留档</td><td><span class="status part">部分（两档实拍）</span></td></tr>
+    <tr><td>3</td><td>行结构：图标 → 名称 → 路径 → 标签</td><td>加宽只拉宽星号内容列；省略、贴右标签、行高不变</td><td>行中部留空属资源管理器式布局的预期</td><td><span class="status ok">已解决</span></td></tr>
   </table>
 </section>
 
@@ -410,7 +436,7 @@
     <b>结论：</b>四边完全对称，只有一层 DWM 边框。实现位于 <code>Platform/NcFrame.cs</code>（WM_NCCALCSIZE / WM_NCPAINT 归零）与 <code>Platform/WindowChrome.cs</code>（DWMWA_BORDER_COLOR + DWMWCP_ROUND），XAML 自绘描边全部归零。
   </div>
   <div class="callout warn">
-    <b>已知差异与未验证项：</b>系统圆角约 8 DIP，设计稿 14 DIP；125% / 150% 缩放未验证（本机固定 200%，改缩放需注销）；最大化/还原不适用（所有窗口固定尺寸且 IsMaximizable=false）。
+    <b>已知差异与未验证项：</b>系统圆角约 8 DIP，设计稿 14 DIP；125% / 150% 缩放已实测（39–42），主窗新几何只拍了 200%/100% 两档；负坐标副屏居中已实测（43），混合 DPI 多屏未拍；最大化/还原不适用（所有窗口禁用最大化，主窗高度固定 436 DIP）。
   </div>
 </section>
 
@@ -420,9 +446,9 @@
   <h2>验证状态</h2>
   <table>
     <tr><th>分类</th><th>项目</th></tr>
-    <tr><td><span class="status ok">已实测</span></td><td>五屏结构、深浅主题边框像素扫描、设置五项即时生效、快速切换真实窗口与「当前」标记、更新四态布局与按钮层级、托盘五项与热键、Release 构建、后台回归 12/12</td></tr>
-    <tr><td><span class="status na">未验证</span></td><td>125%/150% 缩放下的边缘与圆角；真实网络下的下载与安装；真实历史记录下的最近访问列表；多用户/多显示器</td></tr>
-    <tr><td><span class="status part">被环境挡住</span></td><td>锁屏状态下的 CopyFromScreen；改系统缩放需注销；本机无 gh 且仓库 API 未授权，无法查询 CI</td></tr>
+    <tr><td><span class="status ok">已实测</span></td><td>五屏结构、深浅主题边框像素扫描、设置五项即时生效、快速切换真实窗口与「当前」标记、更新四态布局与按钮层级、托盘五项与热键、Release 构建、后台回归 12/12；100%/125%/150%/200% 缩放（39–42）、副屏居中（43）、主窗半宽与 1/4 顶边（44–47）</td></tr>
+    <tr><td><span class="status na">未验证</span></td><td>主窗几何在 125%/150% 下的实拍（探针留档）；混合 DPI 多屏；真实网络下的下载与安装；真实历史记录下的最近访问列表；多用户</td></tr>
+    <tr><td><span class="status part">被环境挡住</span></td><td>锁屏状态下的 CopyFromScreen；本机无 gh 且仓库 API 未授权，无法查询 CI</td></tr>
   </table>
   <div class="callout">
     未接入项（界面已标注，不做假控件）：文件对话框注入、全局 Ctrl+G、在资源管理器中显示、Tab 切换范围、索引目录/排除规则编辑、更新镜像切换、设置侧栏「常规」「关于」。
