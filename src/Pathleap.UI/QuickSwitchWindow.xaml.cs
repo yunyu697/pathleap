@@ -987,6 +987,9 @@ public sealed partial class QuickSwitchWindow : Window
             SearchBox.SelectAll();
         }
 
+        // 激活会把栏提到非置顶层的最前面，可能压到盖住对话框的其它窗口上；
+        // 立刻按 owner 重新插回「对话框正上方一层」，保证两者始终同层。
+        BringToFront();
         AppLog.Info($"快速切换栏进入输入模式: foreground=0x{QuickSwitchNative.GetForegroundWindow().ToInt64():X}");
     }
 
