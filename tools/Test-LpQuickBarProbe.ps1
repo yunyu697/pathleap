@@ -122,6 +122,25 @@ function Get-LpOwner {
     return [LpProbeNative.W]::GetWindowLongPtrW($LpH, -8)
 }
 
+# 紧贴度：bar-above between=0 表示栏紧贴宿主正上方、中间没有第三方窗口。
+# GetWindow(GW_HWNDPREV) 找得到宿主 → 宿主在栏之上（bar-below）；GW_HWNDNEXT 找得到 → 宿主在栏之下（bar-above）。
+function Get-LpAdjacency {
+    param([IntPtr]$LpBar, [IntPtr]$LpDialog)
+    # 只看可见窗口：另一条已隐藏的栏还留着旧矩形，会把「中间夹了窗口」算错。
+    $LpTarget = $LpDialog.ToInt64()
+    foreach ($LpDir in @(@(3, 'bar-below'), @(2, 'bar-above'))) {
+        $LpCur = $LpBar
+        $LpBetween = 0
+        for ($LpI = 0; $LpI -lt 64; $LpI++) {
+            $LpCur = [LpProbeNative.W]::GetWindow($LpCur, $LpDir[0])
+            if ($LpCur -eq [IntPtr]::Zero) { break }
+            if ($LpCur.ToInt64() -eq $LpTarget) { return ('{0} between={1}' -f $LpDir[1], $LpBetween) }
+            if ([LpProbeNative.W]::IsWindowVisible($LpCur)) { $LpBetween++ }
+        }
+    }
+    return 'notfound'
+}
+
 function Get-LpBounds {
     param([IntPtr]$LpH)
     $LpR = New-Object LpProbeNative.W+RECT
@@ -168,6 +187,7 @@ function Close-LpWindow {
 }
 
 # ---------- 清场 ----------
+$LpForegroundBefore = [LpProbeNative.W]::GetForegroundWindow()
 Get-Process Pathleap.UI -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process DialogHost -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 600
@@ -192,6 +212,7 @@ Write-Lp ("dialog1=0x{0:X} bar1=0x{1:X}" -f $LpDlg1.ToInt64(), $LpBar1.ToInt64()
 Write-Lp ''
 Write-Lp '--- [1] z 序：栏空闲吸附态 ---'
 Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
+Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
 
 # ---------- 2. 遮挡：另一个窗口盖到对话框和栏上 ----------
 Write-Lp ''
@@ -216,6 +237,7 @@ Start-Sleep -Milliseconds 500
 Set-LpForeground $LpDlg1
 Start-Sleep -Milliseconds 900
 Write-Lp ('遮挡移除 + 对话框回前台 → 栏可见: {0}' -f ([LpProbeNative.W]::IsWindowVisible($LpBar1)))
+Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
 
 # ---------- 3. 点击闪烁采样 ----------
 Write-Lp ''
@@ -226,6 +248,16 @@ Invoke-LpProbe @('flicker', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$LpFlicke
 Write-Lp ''
 Write-Lp '--- [4] z 序：点击进入输入态后 ---'
 Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
+Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
+
+# ---------- 4b. 输入态退出：点回对话框 ----------
+Write-Lp ''
+Write-Lp '--- [4b] 点回对话框退出输入态：1.2s 紧贴度序列 ---'
+$LpDlgRectA = Get-LpBounds $LpDlg1
+$LpClickX = [int](($LpDlgRectA.L + $LpDlgRectA.R) / 2)
+$LpClickY = [int]($LpDlgRectA.T + 12)
+Invoke-LpProbe @('zseq', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '1200', '1', "$LpClickX", "$LpClickY") | Out-Null
+Write-Lp ('采样后紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
 
 # ---------- 5. 拖动改变尺寸 → 栏跟随 ----------
 Write-Lp ''
@@ -243,10 +275,114 @@ Write-Lp ('最小化前 栏可见: {0}；最小化后 栏可见: {1}' -f $LpVisB
 Start-Sleep -Milliseconds 1200
 Write-Lp ('还原后 栏可见: {0}' -f ([LpProbeNative.W]::IsWindowVisible($LpBar1)))
 Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
+Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
 
-# ---------- 8. 多对话框 ----------
+# ---------- 7. 宿主重新激活：点对话框标题栏，采样紧贴度序列 ----------
 Write-Lp ''
-Write-Lp '--- [8] 第二个对话框：各自跟自己的宿主 ---'
+Write-Lp '--- [7] 点击对话框标题栏重新激活：1.5s 紧贴度序列（目标 bar-above between=0）---'
+$LpDlgRectB = Get-LpBounds $LpDlg1
+$LpClickX = [int](($LpDlgRectB.L + $LpDlgRectB.R) / 2)
+$LpClickY = [int]($LpDlgRectB.T + 12)
+Invoke-LpProbe @('zseq', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '1500', '1', "$LpClickX", "$LpClickY") | Out-Null
+Write-Lp ('采样后紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
+
+# ---------- 7b. 对照实验：LOCATIONCHANGE 钩子能否收到别的进程的高速改尺寸 ----------
+Write-Lp ''
+Write-Lp '--- [7b] 对照实验：独立进程装同款钩子，60Hz 改尺寸 40 帧 ---'
+Invoke-LpProbe @('hooktest', "$([int64]$LpDlg1)", '40', '16') | Out-Null
+
+# ---------- 9. 贴边间隙与四角像素（放大裁切） ----------
+function Invoke-LpSeamCapture([string]$LpSuffix) {
+    Start-Sleep -Milliseconds 400
+    $LpBarRect9 = Get-LpBounds $LpBar1
+    $LpDlgRect9 = Get-LpBounds $LpDlg1
+    $LpGap = $LpBarRect9.T - $LpDlgRect9.B
+    Write-Lp ('对话框可视下边={0} 栏可视上边={1} 可视间隙={2}px 水平居中偏差={3}px' -f $LpDlgRect9.B, $LpBarRect9.T, $LpGap, [int](($LpBarRect9.L + $LpBarRect9.R) / 2 - ($LpDlgRect9.L + $LpDlgRect9.R) / 2))
+    Add-Type -AssemblyName System.Drawing
+    $LpShotDir = Join-Path $LpRepo 'docs\shots'
+    $LpCapX = $LpBarRect9.L - 2
+    $LpCapY = $LpBarRect9.T - 6
+    $LpCapW = ($LpBarRect9.R - $LpBarRect9.L) + 4
+    $LpCapH = ($LpBarRect9.B - $LpBarRect9.T) + 12
+    $LpBmp = New-Object System.Drawing.Bitmap $LpCapW, $LpCapH
+    $LpG = [System.Drawing.Graphics]::FromImage($LpBmp)
+    $LpG.CopyFromScreen($LpCapX, $LpCapY, 0, 0, (New-Object System.Drawing.Size $LpCapW, $LpCapH))
+    # 上半截（含对话框下边缘 6px）按 2 倍放大，用来看接缝是否严丝合缝。
+    $LpSeamH = [Math]::Min($LpCapH, 60)
+    $LpSeam = New-Object System.Drawing.Bitmap ($LpCapW * 2), ($LpSeamH * 2)
+    $LpSeamG = [System.Drawing.Graphics]::FromImage($LpSeam)
+    $LpSeamG.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+    $LpSeamG.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+    $LpSeamG.DrawImage($LpBmp, (New-Object System.Drawing.Rectangle 0, 0, ($LpCapW * 2), ($LpSeamH * 2)), (New-Object System.Drawing.Rectangle 0, 0, $LpCapW, $LpSeamH), [System.Drawing.GraphicsUnit]::Pixel)
+    $LpSeam.Save((Join-Path $LpShotDir ("62-$LpTag-$LpSuffix-seam-2x.png")), [System.Drawing.Imaging.ImageFormat]::Png)
+    $LpSeamG.Dispose(); $LpSeam.Dispose()
+    function Save-LpCrop([int]$LpX, [int]$LpY, [string]$LpName) {
+        $LpCrop = New-Object System.Drawing.Bitmap 60, 60
+        $LpCg = [System.Drawing.Graphics]::FromImage($LpCrop)
+        $LpCg.DrawImage($LpBmp, (New-Object System.Drawing.Rectangle 0, 0, 60, 60), (New-Object System.Drawing.Rectangle $LpX, $LpY, 60, 60), [System.Drawing.GraphicsUnit]::Pixel)
+        $LpCg.Dispose()
+        $LpBig = New-Object System.Drawing.Bitmap 480, 480
+        $LpBg = [System.Drawing.Graphics]::FromImage($LpBig)
+        $LpBg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+        $LpBg.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+        $LpBg.DrawImage($LpCrop, 0, 0, 480, 480)
+        $LpBig.Save((Join-Path $LpShotDir ("61-$LpTag-$LpName-8x.png")), [System.Drawing.Imaging.ImageFormat]::Png)
+        $LpBig.Dispose(); $LpBg.Dispose(); $LpCrop.Dispose()
+    }
+    Save-LpCrop 0 4 'corner-tl'
+    Save-LpCrop ($LpCapW - 60) 4 'corner-tr'
+    Save-LpCrop 0 ($LpCapH - 64) 'corner-bl'
+    Save-LpCrop ($LpCapW - 60) ($LpCapH - 64) 'corner-br'
+    # 采样点相对截图左上角：栏左上角在 (2,6)。
+    function Get-LpPx([int]$LpDx, [int]$LpDy) { $LpBmp.GetPixel(2 + $LpDx, 6 + $LpDy) }
+    function Format-LpPx($LpPix) { return ('#{0:X2}{1:X2}{2:X2}' -f $LpPix.R, $LpPix.G, $LpPix.B) }
+    $LpW9 = [int]($LpBarRect9.R - $LpBarRect9.L)
+    $LpH9 = [int]($LpBarRect9.B - $LpBarRect9.T)
+    Write-Lp ('栏可视矩形: 左上=({0},{1}) 宽高={2}x{3}' -f $LpBarRect9.L, $LpBarRect9.T, $LpW9, $LpH9)
+    # 每角取 4 个点：角点、内缩 1/2/5px，用于判断「圆角外露背景」还是「栏内容没画满」。
+    $LpCorners = @(
+        @{ N = '左上'; X = 0; Y = 0; SX = 1; SY = 1 },
+        @{ N = '右上'; X = ($LpW9 - 1); Y = 0; SX = -1; SY = 1 },
+        @{ N = '左下'; X = 0; Y = ($LpH9 - 1); SX = 1; SY = -1 },
+        @{ N = '右下'; X = ($LpW9 - 1); Y = ($LpH9 - 1); SX = -1; SY = -1 }
+    )
+    foreach ($LpC in $LpCorners) {
+        $LpP0 = Format-LpPx (Get-LpPx $LpC.X $LpC.Y)
+        $LpP1 = Format-LpPx (Get-LpPx ($LpC.X + $LpC.SX) ($LpC.Y + $LpC.SY))
+        $LpP2 = Format-LpPx (Get-LpPx ($LpC.X + 2 * $LpC.SX) ($LpC.Y + 2 * $LpC.SY))
+        $LpP3 = Format-LpPx (Get-LpPx ($LpC.X + 5 * $LpC.SX) ($LpC.Y + 5 * $LpC.SY))
+        Write-Lp ('角 {0}: 角点={1} 内缩1px={2} 内缩2px={3} 内缩5px={4}' -f $LpC.N, $LpP0, $LpP1, $LpP2, $LpP3)
+    }
+    Write-Lp ('栏内参考(距左20,距上12)=({0}) 栏上沿之外2px=({1}) 栏上沿之外1px=({2})' -f `
+        (Format-LpPx (Get-LpPx 20 12)), (Format-LpPx (Get-LpPx 20 -2)), (Format-LpPx (Get-LpPx 20 -1)))
+    $LpMidY = [int]($LpH9 / 2)
+    $LpPxL0 = Format-LpPx (Get-LpPx -1 $LpMidY)
+    $LpPxL1 = Format-LpPx (Get-LpPx 1 $LpMidY)
+    $LpPxR0 = Format-LpPx (Get-LpPx ($LpW9 - 2) $LpMidY)
+    $LpPxR1 = Format-LpPx (Get-LpPx $LpW9 $LpMidY)
+    Write-Lp ('水平中线：栏左外1px={0} 栏左内1px={1}；栏右内1px={2} 栏右外1px={3}' -f $LpPxL0, $LpPxL1, $LpPxR0, $LpPxR1)
+    $LpBmp.Dispose(); $LpG.Dispose()
+}
+
+# ---------- 7c. 拖动前先取一次接缝/四角（1.0.9 拖完会把栏藏起来，必须在拖动前取） ----------
+Write-Lp ''
+Write-Lp '--- [7c] 拖动前：贴边间隙 + 四角像素 ---'
+Invoke-LpSeamCapture 'pre'
+
+# ---------- 8. 连续改尺寸：可见性变化 / 位置序列 / 每帧贴边偏差 ----------
+Write-Lp ''
+Write-Lp '--- [8] 连续改尺寸（60Hz×2s，1ms 级采样）---'
+$LpDragOut = & $LpProbe 'dragresize' "$([int64]$LpBar1)" "$([int64]$LpDlg1)" '120' '16' 2>&1
+$LpDragOut | ForEach-Object { $script:LpLines.Add([string]$_) }
+Write-Lp ('连续改尺寸摘要: {0}' -f (($LpDragOut | Select-String -Pattern 'DRAGSUMMARY|SETTLE' | ForEach-Object { $_.Line }) -join ' / '))
+Write-Lp ('可见性变化明细: {0}' -f (($LpDragOut | Select-String -Pattern '^V|^Z ' | Measure-Object).Count))
+
+# ---------- 9. 拖动后再取一次，确认改尺寸结束后接缝与四角没被破坏 ----------
+Write-Lp ''
+Write-Lp '--- [9] 拖动后：贴边间隙 + 四角像素 ---'
+Invoke-LpSeamCapture 'post'
+
+# ---------- 10. 多对话框 ----------
 $LpHost2 = Start-Process -FilePath $LpHost -ArgumentList @('打开（Pathleap 验收 2）') -PassThru
 $LpDlg2 = Wait-LpWindow -LpWhat '文件对话框 2' -LpMatch { param($LpWin) $LpWin.Class -eq '#32770' -and $LpWin.Pid -eq $LpHost2.Id }
 Set-LpForeground $LpDlg2
@@ -256,10 +392,12 @@ if ($LpBar2 -eq [IntPtr]::Zero) { Write-Lp '对话框 2 没有生成自己的栏
 else {
     Write-Lp ("dialog2=0x{0:X} bar2=0x{1:X}" -f $LpDlg2.ToInt64(), $LpBar2.ToInt64())
     Invoke-LpProbe @('zorder', "$([int64]$LpBar2)", "$([int64]$LpDlg2)", "$([int64]$LpBar1)") | Out-Null
+    Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar2 $LpDlg2))
     Write-Lp '把前台切回对话框 1：'
     Set-LpForeground $LpDlg1
     Start-Sleep -Milliseconds 900
     Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$([int64]$LpBar2)") | Out-Null
+    Write-Lp ('紧贴度: {0}' -f (Get-LpAdjacency $LpBar1 $LpDlg1))
     Write-Lp '关闭对话框 2：'
     Close-LpWindow $LpDlg2
     Start-Sleep -Milliseconds 1500
@@ -275,6 +413,7 @@ Close-LpWindow $LpCoverH
 Close-LpWindow $LpDlg2
 Get-Process DialogHost -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process Pathleap.UI -ErrorAction SilentlyContinue | Stop-Process -Force
+if ($LpForegroundBefore -ne [IntPtr]::Zero) { [void](Set-LpForeground $LpForegroundBefore) }
 
 $script:LpLines | Set-Content -LiteralPath $LpReport -Encoding UTF8
 Write-Host ''
