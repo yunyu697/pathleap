@@ -23,25 +23,25 @@
 
 结论：层级、裁剪、随动天然正确，但与「任何时候不遮挡内容区」直接冲突，放弃。
 
-### 方案 B（采用）：owner 窗口 + 0 间隙贴边 + WinEvent 与常驻轮询随动
+### 方案 B（采用）：owner 窗口 + 8 DIP 间距 + WinEvent 几何驱动、轮询只管 z 序自愈
 
 做法：
 
 1. `SetWindowLongPtr(栏, GWLP_HWNDPARENT, 对话框)` 建立 owner 关系（不是 SetParent）；
-2. 几何：栏**上边缘 = 对话框 DWM 可视外框（`DWMWA_EXTENDED_FRAME_BOUNDS`）的下边，间隙 0**；宽度取可视宽度的一半、水平居中；
-   下方工作区放不下时翻到可视上边之上，同样是 0 间隙。1.0.9 及以前这里是 `round(2×缩放)` 的 2–4px 缝，1.0.10 起归零；
+2. 几何：栏**上边缘 = 对话框 DWM 可视外框（`DWMWA_EXTENDED_FRAME_BOUNDS`）的下边 + 8 DIP 间距**；宽度取可视宽度的一半、水平居中；
+   下方工作区放不下时翻到可视上边之上，同样是 8 DIP 间距。1.0.9 及以前是 `round(2×缩放)` 的 2–4px 失误缝，1.0.10 归零但压住了对话框底边的缩放热区，1.0.11 起按设计稿改成 8 DIP；
 3. z 序：栏插到「宿主正上方那个窗口」的**下面**——取 `GetWindow(宿主, GW_HWNDPREV)` 作为 `SetWindowPos` 的 `hWndInsertAfter`，
    因此栏永远紧贴宿主正上方、中间不可能夹第三方窗口；**不使用 `WS_EX_TOPMOST`**，栏不会浮到其它应用之上；
-4. `SetWinEventHook`（`WINEVENT_OUTOFCONTEXT`）监听 `EVENT_OBJECT_CREATE/SHOW/HIDE/DESTROY`、`EVENT_OBJECT_LOCATIONCHANGE`、`EVENT_SYSTEM_FOREGROUND/MINIMIZE*`，据此挂栏、随动、销毁；
-   另有一条 16ms 设定（实测约 31ms 一拍）的常驻轮询兜底：位置尺寸不变时只读不写，事件被合并或整段丢失时（最小化还原后实测一条事件都不再送达）靠它自愈；
+4. `SetWinEventHook`（`WINEVENT_OUTOFCONTEXT`）监听 `EVENT_OBJECT_CREATE/SHOW/HIDE/DESTROY`、`EVENT_OBJECT_LOCATIONCHANGE`、`EVENT_SYSTEM_FOREGROUND/MINIMIZE*`，**几何变化由 `EVENT_OBJECT_LOCATIONCHANGE` 直接驱动重排，与对话框同一帧完成**；
+   另一条 16ms 设定（实测约 31ms 一拍）的常驻轮询**只做可见性与 z 序自愈**，不参与跟随定位（1.0.11 起）；
 5. 栏窗口加 `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`，显示/点击都不抢对话框焦点。
 
 为什么这样能同时满足各条约束：
 
 - **同一层、不漂在桌面**：owner 窗口在 z 序上永远只排在 owner 之上，不会漂到其它应用前面；owner 最小化时窗口被系统一并隐藏；
 - **多实例天然隔离**：每个对话框各有一个 owner，一条栏只认自己的 owner，`GetWindowLongPtr(-8)` 可逐条核对归属；
-- **不遮挡内容**：栏整条都在对话框可视外框之外，客户区不被侵占。代价是 1.0.10 起贴的是可视外框而非「窗口矩形」，
-  栏会盖住对话框底边那条 4 物理像素（200%）的不可见缩放热区——底边中段改为拖栏而不是缩放对话框，左右下角仍是对话框的热区；
+- **不遮挡内容**：栏整条都在对话框可视外框之外，客户区不被侵占。1.0.11 起留 8 DIP 间距，
+  比对话框「窗口矩形」比可视外框多出的不可见缩放边框（200% 下 11px = 5.5 DIP）还多 2.5 DIP，底边中段的缩放热区完整可用；
 - **尺寸与 DPI**：宽度取对话框可视宽度的一半。缩放系数按**显示器** DPI 计算，因为被注入的对话框可能来自 DPI 不感知的进程（`GetDpiForWindow` 恒为 96），拿它的返回值算会把栏做成一半大小。
 
 ## 实测数据（2026-11-07，200% 缩放显示器）
@@ -434,14 +434,33 @@
 接缝（整栏 + 上方 6px，2 倍）：修复前 [62-base109-pre](shots/62-base109-pre-seam-2x.png) / [post](shots/62-base109-post-seam-2x.png)，
 修复后 [62-final4-pre](shots/62-final4-pre-seam-2x.png) / [post](shots/62-final4-post-seam-2x.png)。
 
+### 1.0.11 修复：圆角回归、8 DIP 间距、事件驱动跟随
+
+1.0.10 的三处取舍被实测否掉（直角格格不入、0 间隙没有层次、改尺寸不跟手），1.0.11 一并改掉：
+
+| 项 | 1.0.10 | 1.0.11 |
+| --- | --- | --- |
+| 圆角 | 直角（`DWMWCP_DONOTROUND`） | DWM 圆角（`DWMWCP_ROUND`）+ 客户区填满 + 关 DWM 描边；实测半径 16px = 8 DIP |
+| 四角像素 | 与栏内同色、无透出 | 角上为对话框阴影/桌面（`#AAAAAA`/`#A6A6A6`/`#B8B8B8`/`#C0C0C0`），内缩 5px `#171A21`，无 `#FFFFFF` |
+| 间距 | 0px | 8 DIP（200% 实测 16px，拖动前后一致，居中偏差 0） |
+| 跟随 | 事件 + 31ms 轮询都调 `PositionAttached()` | 只有 `EVENT_OBJECT_LOCATIONCHANGE` 调 `PositionAttached()`；轮询只做可见性与 z 序自愈 |
+| 120 帧偏差 | avgDev 0.03 / maxDev 4.0 | avgDev 0.25 / maxDev 4.0（第 0 帧瞬时 60），p95=2 p99=3 |
+| 拖动结束 | settleMs=0.0 dev=0.0 | settleMs=0.0 dev=0.0 visible=True |
+| 底边中点热区 | 被栏覆盖 11px | `WindowFromPoint` 命中对话框、`NCHITTEST=0xF (HTBOTTOM)`；栏窗口矩形让出 5px |
+
+白边的正确解法（也是主窗统一时复用的）：WinUI 3 窗口没有逐像素透明，客户区必须整块铺满不透明面面色，
+圆角只交给 DWM 裁剪。1.0.9/1.0.10 时的「方角描边」来自 `DWMWCP_DONOTROUND`（不裁剪，描边自然按矩形画）；
+改成 `ROUND` 后描边跟随弧形，所以主窗保留系统描边、栏继续关描边（`DWMWA_COLOR_NONE`），两者四角都干净。
+四角读数与弧线拟合见 [1.0.11-发布说明](1.0.11-发布说明.md) §1，全站圆角改动清单见 [1.0.11-圆角统一清单.xlsx](1.0.11-圆角统一清单.xlsx)。
+
 ### 取舍与副作用（都实测过）
 
-1. **栏改直角**：`DWMWCP_DONOTROUND` + 客户区填满。0 间隙时圆角必然在四角露出后面的像素（不管是对话框阴影还是桌面），
-   要「贴死且不露白」就只能不做圆角。代价是与主窗的圆角风格不一致。
-2. **对话框底边的不可见缩放热区被盖住**：栏贴在可视下边上，会覆盖对话框窗口矩形底部约 4px（200%）的缩放热区；
-   底边中段改为拖动栏，左右下角仍是对话框的热区。这是 0 间隙的直接代价。
-3. **轮询节拍 31ms 而非 16ms**：`DispatcherQueueTimer` 在本机实测 31ms 一拍，静止时每拍只做几次窗口查询、不重绘；
-   激活/拖动瞬间的滞后由 WinEvent 立即触发的位置计算兜住（实测 3 步延迟 2.77–3.94ms）。
+1. **圆角只能取系统的 8 DIP**：DWM 只提供 `ROUND`(8)/`ROUNDSMALL`(4)/`DONOTROUND` 三档，自定义半径要用 `SetWindowRgn`
+   硬裁剪（无抗锯齿、200% 下锯齿明显），所以栏按 8 DIP 落地，比设计稿记录的 10 DIP 小 2 DIP，与主窗（设计 14 → 8）同一处差异。
+2. **栏与对话框之间固定 8 DIP**：既满足设计稿的 8 的倍数间距，也大于对话框窗口矩形底部那条不可见缩放边框
+   （200% 下 11px = 5.5 DIP），底边中段缩放热区因此完整可用；再小就会重新盖住热区，再大就没有「同一组元素」的连体感。
+3. **轮询只管 z 序自愈**：`DispatcherQueueTimer` 在本机实测 31ms 一拍，现在只做可见性判定与
+   `EnsureAboveDialog()`，不参与定位；几何跟随由 WinEvent 直接驱动（12 步实测 2.32–4.40ms，全部 `settled=True`）。
 4. **不用 TOPMOST**：探针每轮打印 `topmost=False`；栏始终只是 owned 窗口，其它程序的普通窗口可以正常盖住对话框与栏。
 5. **最大化仍不贴边**：对话框最大化时上下都没有空间，栏回退到工作区顶部附近（`gapPx=-848`、`gapMatches=false`），
    与 1.0.9 的既有行为一致，未在本轮改动。
