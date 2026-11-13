@@ -56,6 +56,8 @@ namespace LpProbeNative
         [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int cb);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
+        [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     }
 }
 '@ -WarningAction SilentlyContinue
@@ -100,13 +102,19 @@ function Wait-LpWindow {
 
 function Set-LpForeground {
     param([IntPtr]$LpH)
-    $LpCur = [LpProbeNative.W]::GetCurrentThreadId()
-    $LpFg = [LpProbeNative.W]::GetForegroundWindow()
-    $LpPidOut = [uint32]0
-    $LpFgThread = [LpProbeNative.W]::GetWindowThreadProcessId($LpFg, [ref]$LpPidOut)
-    $LpAtt = ($LpCur -ne $LpFgThread) -and [LpProbeNative.W]::AttachThreadInput($LpCur, $LpFgThread, $true)
-    try { [void][LpProbeNative.W]::SetForegroundWindow($LpH) }
-    finally { if ($LpAtt) { [void][LpProbeNative.W]::AttachThreadInput($LpCur, $LpFgThread, $false) } }
+    for ($LpTry = 1; $LpTry -le 5; $LpTry++) {
+        $LpCur = [LpProbeNative.W]::GetCurrentThreadId()
+        $LpFg = [LpProbeNative.W]::GetForegroundWindow()
+        $LpPidOut = [uint32]0
+        $LpFgThread = [LpProbeNative.W]::GetWindowThreadProcessId($LpFg, [ref]$LpPidOut)
+        $LpAtt = ($LpCur -ne $LpFgThread) -and [LpProbeNative.W]::AttachThreadInput($LpCur, $LpFgThread, $true)
+        try { [void][LpProbeNative.W]::SetForegroundWindow($LpH) }
+        finally { if ($LpAtt) { [void][LpProbeNative.W]::AttachThreadInput($LpCur, $LpFgThread, $false) } }
+        Start-Sleep -Milliseconds 250
+        if ([LpProbeNative.W]::GetForegroundWindow() -eq $LpH) { return $true }
+    }
+    Write-Lp ("前台切换失败: 目标 0x{0:X}，当前 0x{1:X}" -f $LpH.ToInt64(), [LpProbeNative.W]::GetForegroundWindow().ToInt64())
+    return $false
 }
 
 function Get-LpOwner {
@@ -141,13 +149,16 @@ function Test-LpOverlap {
 function Find-LpBarFor {
     param([IntPtr]$LpDialog)
     $LpDeadline = (Get-Date).AddSeconds(15)
+    $LpSeen = 0
     while ((Get-Date) -lt $LpDeadline) {
-        $LpBars = Get-LpWindows | Where-Object { $_.Title -eq 'Pathleap 快速切换' }
+        $LpBars = @(Get-LpWindows | Where-Object { $_.Title -eq 'Pathleap 快速切换' })
+        $LpSeen = [Math]::Max($LpSeen, $LpBars.Count)
         foreach ($LpBar in $LpBars) {
             if ((Get-LpOwner $LpBar.Handle) -eq $LpDialog) { return $LpBar.Handle }
         }
         Start-Sleep -Milliseconds 250
     }
+    Write-Lp ("找不到属于对话框 0x{0:X} 的栏（期间见过 {1} 个栏）" -f $LpDialog.ToInt64(), $LpSeen)
     return [IntPtr]::Zero
 }
 
@@ -179,70 +190,59 @@ Write-Lp ("dialog1=0x{0:X} bar1=0x{1:X}" -f $LpDlg1.ToInt64(), $LpBar1.ToInt64()
 
 # ---------- 1. z 序基线 ----------
 Write-Lp ''
-Write-Lp '--- [1] z 序：点击前 ---'
+Write-Lp '--- [1] z 序：栏空闲吸附态 ---'
 Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
 
-# ---------- 2. 点击闪烁采样 ----------
+# ---------- 2. 遮挡：另一个窗口盖到对话框和栏上 ----------
 Write-Lp ''
-Write-Lp ("--- [2] 点击闪烁采样 {0}ms（在栏中心 SendInput 左键）---" -f $LpFlickerMs)
-Invoke-LpProbe @('flicker', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$LpFlickerMs", '1') | Out-Null
-
-# ---------- 3. 点击后 z 序 ----------
-Write-Lp ''
-Write-Lp '--- [3] z 序：点击进入输入态后 ---'
-Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
-
-# ---------- 4. 拖动改变尺寸 → 栏跟随 ----------
-Write-Lp ''
-Write-Lp ("--- [4] 对话框逐级放大：{0} 步 × {1}px，采样栏位置延迟 ---" -f $LpFollowSteps, $LpFollowStepPx)
-Invoke-LpProbe @('follow', "$([int64]$LpDlg1)", "$([int64]$LpBar1)", "$LpFollowSteps", "$LpFollowStepPx") | Out-Null
-
-# ---------- 5. 遮挡：另一个窗口盖到对话框和栏上 ----------
-Write-Lp ''
-Write-Lp '--- [5] 遮挡窗口同时盖住对话框与栏（不激活，纯 z 序）---'
+Write-Lp '--- [2] 另一个窗口盖住对话框与栏（遮挡窗插到对话框正上方）---'
 $LpCover = Start-Process -FilePath $LpHost -ArgumentList @('cover') -PassThru
 $LpCoverH = Wait-LpWindow -LpWhat '遮挡窗口' -LpMatch { param($w) $w.Title -eq '遮挡测试' }
-Start-Sleep -Milliseconds 1200
+# 遮挡窗显示时会自己激活到最前，等价于用户切到别的应用窗口。
+Start-Sleep -Milliseconds 1500
 $LpBarRect = Get-LpBounds $LpBar1
 $LpDlgRect = Get-LpBounds $LpDlg1
-$LpCoverX = [int]$LpDlgRect.L
-$LpCoverY = [int]$LpDlgRect.T
-$LpCoverW = [int]($LpBarRect.R - $LpDlgRect.L)
-$LpCoverH2 = [int]($LpBarRect.B - $LpDlgRect.T)
-$LpCovered = $false
-for ($LpTry = 1; $LpTry -le 3; $LpTry++) {
-    [void][LpProbeNative.W]::SetWindowPos($LpCoverH, [IntPtr]::Zero, $LpCoverX, $LpCoverY, $LpCoverW, $LpCoverH2, 0x0010)
-    Start-Sleep -Milliseconds 700
-    $LpProbeBarRect = Get-LpBounds $LpBar1
-    $LpPxTry = & $LpProbe 'pixel' ([int]($LpProbeBarRect.L + ($LpProbeBarRect.R - $LpProbeBarRect.L) / 2)) ([int]($LpProbeBarRect.T + ($LpProbeBarRect.B - $LpProbeBarRect.T) / 2))
-    Write-Lp (('遮挡尝试 {0}: ' -f $LpTry) + ($LpPxTry -join ' '))
-    if ($LpPxTry -match '#FF00FF') { $LpCovered = $true; break }
-}
 Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$([int64]$LpCoverH)") | Out-Null
-Write-Lp (('栏被遮挡: {0}' -f $LpCovered))
-Write-Lp (('栏-对话框矩形相交: {0}' -f (Test-LpOverlap $LpBarRect $LpDlgRect)))
-$LpBarRect = Get-LpBounds $LpBar1
 $LpPx = & $LpProbe 'pixel' ([int]($LpBarRect.L + ($LpBarRect.R - $LpBarRect.L) / 2)) ([int]($LpBarRect.T + ($LpBarRect.B - $LpBarRect.T) / 2))
-Write-Lp (('栏中心屏幕像素（被遮挡时，遮挡窗为品红): ' + ($LpPx -join ' ')))
 $LpPx2 = & $LpProbe 'pixel' ([int]($LpDlgRect.L + 300)) ([int]($LpDlgRect.T + 300))
-Write-Lp (('对话框内部像素（被遮挡时）: ' + ($LpPx2 -join ' ')))
+Write-Lp (('对话框被遮挡: {0}（像素 {1}）' -f ((($LpPx2 -join ' ') -match '#FF00FF')), ($LpPx2 -join ' ')))
+Write-Lp (('栏被遮挡: {0}（像素 {1}）' -f ((($LpPx -join ' ') -match '#FF00FF'), ($LpPx -join ' '))))
+Write-Lp (('栏-对话框矩形相交: {0}' -f (Test-LpOverlap $LpBarRect $LpDlgRect)))
+Write-Lp ('窗口可见性: 栏={0} 对话框={1} 遮挡窗={2}' -f ([LpProbeNative.W]::IsWindowVisible($LpBar1)), ([LpProbeNative.W]::IsWindowVisible($LpDlg1)), ([LpProbeNative.W]::IsWindowVisible($LpCoverH)))
 
-# ---------- 6. 遮挡窗口取得前台 ----------
-Write-Lp ''
-Write-Lp '--- [6] 遮挡窗口取得前台（对话框失去前台）---'
-Set-LpForeground $LpCoverH
-Start-Sleep -Milliseconds 900
-Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$([int64]$LpCoverH)") | Out-Null
-
-# ---------- 7. 对话框回到前台 ----------
-Write-Lp ''
-Write-Lp '--- [7] 对话框重新回到前台 ---'
+# 遮挡物移走 + 对话框回前台，栏应原样回来
+[void][LpProbeNative.W]::PostMessageW($LpCoverH, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+Start-Sleep -Milliseconds 500
 Set-LpForeground $LpDlg1
 Start-Sleep -Milliseconds 900
-Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$([int64]$LpCoverH)") | Out-Null
-$LpBarRect = Get-LpBounds $LpBar1
-$LpPx = & $LpProbe 'pixel' ([int]($LpBarRect.L + ($LpBarRect.R - $LpBarRect.L) / 2)) ([int]($LpBarRect.T + ($LpBarRect.B - $LpBarRect.T) / 2))
-Write-Lp (('栏中心屏幕像素（回到前台后）: ' + ($LpPx -join ' ')))
+Write-Lp ('遮挡移除 + 对话框回前台 → 栏可见: {0}' -f ([LpProbeNative.W]::IsWindowVisible($LpBar1)))
+
+# ---------- 3. 点击闪烁采样 ----------
+Write-Lp ''
+Write-Lp ("--- [3] 点击闪烁采样 {0}ms（在栏中心 SendInput 左键）---" -f $LpFlickerMs)
+Invoke-LpProbe @('flicker', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", "$LpFlickerMs", '1') | Out-Null
+
+# ---------- 4. 点击后 z 序 ----------
+Write-Lp ''
+Write-Lp '--- [4] z 序：点击进入输入态后 ---'
+Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
+
+# ---------- 5. 拖动改变尺寸 → 栏跟随 ----------
+Write-Lp ''
+Write-Lp ("--- [5] 对话框逐级放大：{0} 步 × {1}px，采样栏位置延迟 ---" -f $LpFollowSteps, $LpFollowStepPx)
+Invoke-LpProbe @('follow', "$([int64]$LpDlg1)", "$([int64]$LpBar1)", "$LpFollowSteps", "$LpFollowStepPx") | Out-Null
+
+# ---------- 6. 最小化 / 还原 ----------
+Write-Lp ''
+Write-Lp '--- [6] 对话框最小化 / 还原 ---'
+$LpVisBefore = [LpProbeNative.W]::IsWindowVisible($LpBar1)
+[void][LpProbeNative.W]::ShowWindow($LpDlg1, 6)
+Start-Sleep -Milliseconds 900
+Write-Lp ('最小化前 栏可见: {0}；最小化后 栏可见: {1}' -f $LpVisBefore, ([LpProbeNative.W]::IsWindowVisible($LpBar1)))
+[void][LpProbeNative.W]::ShowWindow($LpDlg1, 9)
+Start-Sleep -Milliseconds 1200
+Write-Lp ('还原后 栏可见: {0}' -f ([LpProbeNative.W]::IsWindowVisible($LpBar1)))
+Invoke-LpProbe @('zorder', "$([int64]$LpBar1)", "$([int64]$LpDlg1)", '0') | Out-Null
 
 # ---------- 8. 多对话框 ----------
 Write-Lp ''
