@@ -8,7 +8,7 @@ namespace Pathleap.Shared.Index;
 /// </summary>
 public static class ExtrasIndexRoots
 {
-    /// <summary>按配置解析附加索引根，去重并保持顺序：映射盘在前，手动添加的共享在后。</summary>
+    /// <summary>按配置解析附加索引根，去重并保持顺序：映射盘在前，手动添加的共享次之，附加目录在后。</summary>
     public static IReadOnlyList<string> Resolve(AppConfig config)
     {
         var lpRoots = new List<string>();
@@ -27,7 +27,35 @@ public static class ExtrasIndexRoots
             }
         }
 
-        return lpRoots;
+        foreach (var lpDirectory in config.IndexDirectories)
+        {
+            AddIfUsable(lpRoots, lpSeen, lpDirectory);
+        }
+
+        return PruneNestedRoots(lpRoots);
+    }
+
+    /// <summary>去掉被其他根包含的根：同时添加 C:\Work 与 C:\Work\Sub 时只扫外层，避免重复结果。</summary>
+    private static IReadOnlyList<string> PruneNestedRoots(List<string> roots)
+    {
+        if (roots.Count <= 1)
+        {
+            return roots;
+        }
+
+        var lpKept = new List<string>(roots.Count);
+        foreach (var lpRoot in roots.OrderBy(static lpPath => lpPath.Length))
+        {
+            var lpCovered = lpKept.Any(lpKeptRoot =>
+                lpRoot.Equals(lpKeptRoot, StringComparison.OrdinalIgnoreCase)
+                || lpRoot.StartsWith(lpKeptRoot.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase));
+            if (!lpCovered)
+            {
+                lpKept.Add(lpRoot);
+            }
+        }
+
+        return lpKept;
     }
 
     private static IEnumerable<string> MappedNetworkDriveRoots()

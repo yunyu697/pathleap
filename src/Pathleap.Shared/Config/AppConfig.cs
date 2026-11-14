@@ -104,6 +104,9 @@ public sealed class AppConfig
     /// <summary>用户手动添加的网络共享路径（\\server\share 或盘符）：只在该开关打开时参与附加索引。</summary>
     public List<string> NetworkLocations { get; set; } = new();
 
+    /// <summary>额外索引目录（本地文件夹）：与主索引卷根不同，作为附加索引根参与搜索。</summary>
+    public List<string> IndexDirectories { get; set; } = new();
+
     public void Normalize()
     {
         if (SchemaVersion < 2)
@@ -172,6 +175,12 @@ public sealed class AppConfig
             .ToList();
 
         NetworkLocations = (NetworkLocations ?? new List<string>())
+            .Where(static lpPath => !string.IsNullOrWhiteSpace(lpPath))
+            .Select(static lpPath => lpPath.Trim().TrimEnd('\\'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        IndexDirectories = (IndexDirectories ?? new List<string>())
             .Where(static lpPath => !string.IsNullOrWhiteSpace(lpPath))
             .Select(static lpPath => lpPath.Trim().TrimEnd('\\'))
             .Distinct(StringComparer.OrdinalIgnoreCase)

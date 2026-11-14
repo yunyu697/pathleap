@@ -80,6 +80,7 @@ public sealed partial class SettingsWindow : Window
         _lpSyncingNetwork = false;
         NetworkPanel.Visibility = _lpConfig.IncludeNetworkLocations ? Visibility.Visible : Visibility.Collapsed;
         RefreshNetworkLocations();
+        RefreshIndexDirectories();
         ApplyInstallInfo();
         RefreshElevationState();
 
@@ -731,6 +732,130 @@ public sealed partial class SettingsWindow : Window
         {
             _ = RequestExtrasBuildAsync();
         }
+    }
+
+    /// <summary>附加索引目录（本地文件夹）列表：与网络位置共用 extras 索引与重建通道。</summary>
+    private void RefreshIndexDirectories()
+    {
+        IndexDirectoryPanel.Children.Clear();
+        IndexDirStatusText.Text = _lpConfig.IndexDirectories.Count == 0
+            ? "未添加附加索引目录；主索引卷之外的文件夹可加到这里。"
+            : $"已添加 {_lpConfig.IndexDirectories.Count} 个附加索引目录。";
+
+        foreach (var lpDirectory in _lpConfig.IndexDirectories)
+        {
+            IndexDirectoryPanel.Children.Add(BuildIndexDirectoryRow(lpDirectory));
+        }
+    }
+
+    private Border BuildIndexDirectoryRow(string directory)
+    {
+        var lpText = new TextBlock
+        {
+            Text = directory,
+            FontSize = 11,
+            Foreground = _lpTheme.Text1Brush,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(lpText, directory);
+
+        var lpRemove = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE711", FontSize = 10 },
+            Background = _lpTheme.TransparentBrush,
+            BorderBrush = _lpTheme.TransparentBrush,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6, 0, 6, 0),
+            Height = 24,
+            MinWidth = 28,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = directory
+        };
+        AutomationProperties.SetName(lpRemove, $"移除索引目录 {directory}");
+        ToolTipService.SetToolTip(lpRemove, "移除");
+        lpRemove.Click += OnRemoveIndexDirectoryClick;
+
+        var lpRow = new Grid();
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        lpRow.Children.Add(lpText);
+        Grid.SetColumn(lpRemove, 1);
+        lpRow.Children.Add(lpRemove);
+
+        return new Border
+        {
+            Background = _lpTheme.Surface2Brush,
+            BorderBrush = _lpTheme.Border1Brush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10, 4, 4, 4),
+            Child = lpRow
+        };
+    }
+
+    private void OnAddIndexDirectoryClick(object sender, RoutedEventArgs e)
+    {
+        var lpInput = IndexDirPathBox.Text.Trim();
+        if (lpInput.Length == 0)
+        {
+            IndexDirStatusText.Text = "请输入文件夹完整路径，例如 D:\\Projects";
+            return;
+        }
+
+        string lpFullPath;
+        try
+        {
+            lpFullPath = Path.GetFullPath(lpInput).TrimEnd('\\');
+        }
+        catch (Exception ex)
+        {
+            IndexDirStatusText.Text = "路径无效：" + ex.Message;
+            return;
+        }
+
+        if (!Directory.Exists(lpFullPath))
+        {
+            IndexDirStatusText.Text = $"目录不存在：{lpFullPath}";
+            return;
+        }
+
+        if (_lpConfig.IndexDirectories.Any(lpExisting =>
+                string.Equals(lpExisting.TrimEnd('\\'), lpFullPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            IndexDirStatusText.Text = "该目录已在列表中";
+            return;
+        }
+
+        _lpConfig.IndexDirectories.Add(lpFullPath);
+        _lpTheme.SaveConfig();
+        IndexDirPathBox.Text = string.Empty;
+        AppLog.Info($"附加索引目录已添加: {lpFullPath}");
+        RefreshIndexDirectories();
+        IndexDirStatusText.Text = $"已添加：{lpFullPath}（正在后台建立索引）";
+        _ = RequestExtrasBuildAsync();
+    }
+
+    private void OnRemoveIndexDirectoryClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string lpDirectory })
+        {
+            return;
+        }
+
+        var lpIndex = _lpConfig.IndexDirectories.FindIndex(lpExisting =>
+            string.Equals(lpExisting.TrimEnd('\\'), lpDirectory.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+        if (lpIndex < 0)
+        {
+            return;
+        }
+
+        _lpConfig.IndexDirectories.RemoveAt(lpIndex);
+        _lpTheme.SaveConfig();
+        AppLog.Info($"附加索引目录已移除: {lpDirectory}");
+        RefreshIndexDirectories();
+        IndexDirStatusText.Text = $"已移除：{lpDirectory}";
+        _ = RequestExtrasBuildAsync();
     }
 
     /// <summary>请求服务端按当前配置重建附加索引；成功后取消旧映射并重新装载。</summary>

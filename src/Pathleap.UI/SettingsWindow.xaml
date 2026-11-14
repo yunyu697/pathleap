@@ -639,7 +639,7 @@
                                            FontSize="20"
                                            FontWeight="SemiBold"
                                            Foreground="{ThemeResource Text1Brush}" />
-                                <TextBlock Text="当前索引单个卷的根目录；附加目录暂不可增删。"
+                                <TextBlock Text="主索引覆盖单个卷；可在下方添加附加索引目录与网络位置。"
                                            FontSize="11"
                                            Foreground="{ThemeResource Text3Brush}"
                                            Margin="0,5,0,0" />
@@ -745,6 +745,29 @@
                                            Style="{StaticResource LpSectionLabelStyle}"
                                            Margin="0,20,0,9" />
                                 <StackPanel x:Name="IndexChipsPanel" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" />
+
+                                <Grid ColumnSpacing="8" Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="IndexDirPathBox"
+                                             PlaceholderText="附加索引目录，例如 D:\Projects"
+                                             FontSize="11.5"
+                                             Height="32"
+                                             VerticalAlignment="Center" />
+                                    <Button x:Name="IndexDirAddButton"
+                                            Grid.Column="1"
+                                            Content="添加"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            Click="OnAddIndexDirectoryClick" />
+                                </Grid>
+                                <TextBlock x:Name="IndexDirStatusText"
+                                           FontSize="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,6,0,0" />
+                                <StackPanel x:Name="IndexDirectoryPanel" Spacing="6" Margin="0,6,0,0" />
 
                                 <TextBlock Text="排除规则"
                                            Style="{StaticResource LpSectionLabelStyle}"
