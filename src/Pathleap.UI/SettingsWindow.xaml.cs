@@ -28,6 +28,7 @@ public sealed partial class SettingsWindow : Window
     private string _lpCurrentPage = "appearance";
     private bool _lpSyncingElevation;
     private bool _lpSyncingScopeApps;
+    private bool _lpSyncingScopeBrowser;
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
@@ -70,6 +71,9 @@ public sealed partial class SettingsWindow : Window
         _lpSyncingScopeApps = true;
         ScopeAppsSwitch.IsOn = _lpConfig.IncludeInstalledPrograms;
         _lpSyncingScopeApps = false;
+        _lpSyncingScopeBrowser = true;
+        ScopeBrowserSwitch.IsOn = _lpConfig.IncludeBrowserHistory;
+        _lpSyncingScopeBrowser = false;
         ApplyInstallInfo();
         RefreshElevationState();
 
@@ -525,6 +529,18 @@ public sealed partial class SettingsWindow : Window
         _lpConfig.IncludeInstalledPrograms = ScopeAppsSwitch.IsOn;
         _lpTheme.SaveConfig();
         AppLog.Info($"已安装程序搜索：{(ScopeAppsSwitch.IsOn ? "开" : "关")}（下一次搜索即生效）");
+    }
+
+    private void OnScopeBrowserToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingScopeBrowser)
+        {
+            return;
+        }
+
+        _lpConfig.IncludeBrowserHistory = ScopeBrowserSwitch.IsOn;
+        _lpTheme.SaveConfig();
+        AppLog.Info($"浏览器历史与书签搜索：{(ScopeBrowserSwitch.IsOn ? "开" : "关")}（下一次搜索即生效）");
     }
 
     private void OnAcrylicToggled(object? sender, EventArgs e)

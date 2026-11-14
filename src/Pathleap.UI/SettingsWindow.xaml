@@ -639,7 +639,7 @@
                                            FontSize="20"
                                            FontWeight="SemiBold"
                                            Foreground="{ThemeResource Text1Brush}" />
-                                <TextBlock Text="当前索引单个卷的根目录；浏览器数据与网络位置尚未提供配置。"
+                                <TextBlock Text="当前索引单个卷的根目录；索引目录与网络位置暂不可增删。"
                                            FontSize="11"
                                            Foreground="{ThemeResource Text3Brush}"
                                            Margin="0,5,0,0" />
@@ -690,13 +690,11 @@
                                         <FontIcon Glyph="&#xE774;" FontSize="13" Foreground="#3FAE95" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="浏览器历史与书签" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
-                                            <TextBlock Text="未接入" FontSize="9" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="需要授权 Chrome / Edge 数据目录" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
+                                        <TextBlock Text="浏览器历史与书签" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock Text="读取本机 Chrome / Edge 的 Bookmarks 与 History，开启后下一次搜索即生效" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
                                     </StackPanel>
-                                    <controls:LpSwitch x:Name="ScopeBrowserSwitch" Grid.Column="2" IsOn="False" IsEnabled="False" VerticalAlignment="Center" />
+                                    <controls:LpSwitch x:Name="ScopeBrowserSwitch" Grid.Column="2" IsOn="False" VerticalAlignment="Center"
+                                                       AutomationProperties.Name="浏览器历史与书签搜索开关" Toggled="OnScopeBrowserToggled" />
                                 </Grid>
                                 <Grid Margin="0,8,0,4">
                                     <Grid.ColumnDefinitions>

@@ -4,8 +4,11 @@ using Pathleap.Shared.Diagnostics;
 
 namespace Pathleap.Service.Index;
 
-/// <summary>查询侧的用户偏好快照：排除前缀 + 是否包含已安装程序。</summary>
-internal sealed record SearchPreferencesSnapshot(string[] ExcludedPrefixes, bool IncludeInstalledPrograms);
+/// <summary>查询侧的用户偏好快照：排除前缀 + 是否包含已安装程序 / 浏览器数据。</summary>
+internal sealed record SearchPreferencesSnapshot(
+    string[] ExcludedPrefixes,
+    bool IncludeInstalledPrograms,
+    bool IncludeBrowserHistory);
 
 /// <summary>
 /// 用户配置（config.json）里的查询偏好。按文件修改时间懒加载，查询时取一次快照：
@@ -15,7 +18,7 @@ internal sealed class SearchPreferences
 {
     private readonly string _lpConfigPath = AppPaths.ConfigFile;
     private readonly object _lpGate = new();
-    private SearchPreferencesSnapshot _lpSnapshot = new(Array.Empty<string>(), true);
+    private SearchPreferencesSnapshot _lpSnapshot = new(Array.Empty<string>(), true, false);
     private DateTime _lpStamp = DateTime.MinValue;
     private bool _lpLoaded;
 
@@ -33,12 +36,14 @@ internal sealed class SearchPreferences
                     var lpConfig = ConfigStore.Load(_lpConfigPath);
                     _lpSnapshot = new SearchPreferencesSnapshot(
                         Normalize(lpConfig.ExcludedPaths),
-                        lpConfig.IncludeInstalledPrograms);
+                        lpConfig.IncludeInstalledPrograms,
+                        lpConfig.IncludeBrowserHistory);
                     _lpStamp = lpStamp;
                     _lpLoaded = true;
                     AppLog.Info(
                         $"搜索偏好已加载：排除 {_lpSnapshot.ExcludedPrefixes.Length} 条，" +
-                        $"已安装程序 {(_lpSnapshot.IncludeInstalledPrograms ? "开" : "关")}" +
+                        $"已安装程序 {(_lpSnapshot.IncludeInstalledPrograms ? "开" : "关")}，" +
+                        $"浏览器数据 {(_lpSnapshot.IncludeBrowserHistory ? "开" : "关")}" +
                         (_lpSnapshot.ExcludedPrefixes.Length == 0
                             ? string.Empty
                             : "（" + string.Join("；", _lpSnapshot.ExcludedPrefixes) + "）"));

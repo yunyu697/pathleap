@@ -16,6 +16,9 @@ public sealed class SearchHit
     /// <summary>来自「已安装程序」目录（开始菜单/注册表），用于结果行打「程序」标签。</summary>
     public bool IsProgram { get; set; }
 
+    /// <summary>来自浏览器书签 / 历史（Path 为 URL），用于结果行打「网页」标签。</summary>
+    public bool IsBrowser { get; set; }
+
     public long Size { get; set; }
 
     public DateTimeOffset? ModifiedAt { get; set; }

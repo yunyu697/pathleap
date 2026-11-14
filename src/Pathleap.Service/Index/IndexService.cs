@@ -19,6 +19,7 @@ internal sealed class IndexService : IDisposable
     private readonly object _lpGate = new();
     private readonly SearchPreferences _lpPreferences = new();
     private readonly InstalledProgramIndex _lpPrograms = new();
+    private readonly BrowserIndex _lpBrowser = new();
     private IndexSnapshot? _lpSnapshot;
     private SearchEngine? _lpEngine;
     private IndexStatusDto _lpStatus = new() { State = "not-built", Note = "尚未构建索引" };
@@ -387,34 +388,47 @@ internal sealed class IndexService : IDisposable
             return null;
         }
 
-        // 已安装程序与文件索引合并：程序通常在启动器场景里更相关，同 tier 时排在文件前。
-        if (lpPreferences.IncludeInstalledPrograms
-            && directoriesOnly != true
-            && !string.IsNullOrWhiteSpace(query))
+        // 已安装程序、浏览器书签/历史与文件索引合并：这两类在启动器场景里更相关，
+        // 同 tier 时排在文件命中之前。
+        var lpSupplemental = new List<SearchHit>();
+        if (directoriesOnly != true && !string.IsNullOrWhiteSpace(query))
         {
-            var lpProgramHits = _lpPrograms.Match(query, limit, lpPathAllowed);
-            if (lpProgramHits.Count > 0)
+            if (lpPreferences.IncludeInstalledPrograms)
             {
-                MergeProgramHits(lpOutcome, lpProgramHits, limit);
+                lpSupplemental.AddRange(_lpPrograms.Match(query, limit, lpPathAllowed));
             }
+
+            if (lpPreferences.IncludeBrowserHistory)
+            {
+                lpSupplemental.AddRange(_lpBrowser.Match(query, limit));
+            }
+        }
+
+        if (lpSupplemental.Count > 0)
+        {
+            MergeSupplementalHits(lpOutcome, lpSupplemental, limit);
         }
 
         return lpOutcome;
     }
 
     /// <summary>
-    /// 程序条目按路径去重后并进结果，再按 tier 稳定排序（程序先插入，同 tier 在前）。
+    /// 补充来源（程序 / 浏览器）按路径去重后并进结果，再按 tier 稳定排序（补充条目先插入，同 tier 在前）。
     /// 同一应用的重复快捷方式（用户/公共开始菜单各一份）只保留一条：文件命中里的 .lnk
     /// 若与程序条目同名，也一并丢掉，避免结果里出现“draw.io”和“draw.io.lnk”两条。
     /// </summary>
-    private static void MergeProgramHits(SearchOutcome outcome, List<SearchHit> programHits, int limit)
+    private static void MergeSupplementalHits(SearchOutcome outcome, List<SearchHit> supplementalHits, int limit)
     {
         var lpSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var lpProgramNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var lpMerged = new List<SearchHit>(programHits.Count + outcome.Hits.Count);
-        foreach (var lpHit in programHits)
+        var lpMerged = new List<SearchHit>(supplementalHits.Count + outcome.Hits.Count);
+        foreach (var lpHit in supplementalHits)
         {
-            lpProgramNames.Add(lpHit.Name);
+            if (lpHit.IsProgram)
+            {
+                lpProgramNames.Add(lpHit.Name);
+            }
+
             if (lpSeen.Add(lpHit.Path))
             {
                 lpMerged.Add(lpHit);

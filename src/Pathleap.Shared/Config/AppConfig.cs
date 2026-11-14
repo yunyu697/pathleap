@@ -89,6 +89,12 @@ public sealed class AppConfig
     /// <summary>是否把已安装程序（开始菜单快捷方式 + 注册表可启动项）并入搜索结果。</summary>
     public bool IncludeInstalledPrograms { get; set; } = true;
 
+    /// <summary>
+    /// 是否把 Chrome / Edge 的书签与历史记录并入搜索结果。
+    /// 只在本机读取配置目录下的 Bookmarks / History，匹配与打开都不联网；默认关闭。
+    /// </summary>
+    public bool IncludeBrowserHistory { get; set; }
+
     public void Normalize()
     {
         if (SchemaVersion < 2)

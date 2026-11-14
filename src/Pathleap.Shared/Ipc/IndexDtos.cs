@@ -52,6 +52,9 @@ public sealed class SearchHitDto
     /// <summary>是否为「已安装程序」条目（开始菜单/注册表来源）。</summary>
     public bool IsProgram { get; set; }
 
+    /// <summary>是否为浏览器书签 / 历史条目（Path 为 URL）。</summary>
+    public bool IsBrowser { get; set; }
+
     public long Size { get; set; }
 
     public string? ModifiedAt { get; set; }

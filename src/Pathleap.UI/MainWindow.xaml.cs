@@ -986,7 +986,7 @@ public sealed partial class MainWindow : Window
                 : new ProcessStartInfo(lpRow.FullPath) { UseShellExecute = true };
             Process.Start(lpStartInfo);
             RecentStore.Record(lpRow.FullPath, lpRow.Name, lpRow.IsDirectory);
-            AppLog.Info($"已打开 {(lpRow.IsDirectory ? "目录" : "文件")}: {lpRow.FullPath}");
+            AppLog.Info($"已打开 {(lpRow.IsBrowser ? "网页" : lpRow.IsDirectory ? "目录" : "文件")}: {lpRow.FullPath}");
             HideCore();
         }
         catch (Exception ex)
@@ -1114,6 +1114,7 @@ public sealed class LpResultRow : INotifyPropertyChanged
     private static readonly Color FileColor = Color.FromArgb(255, 76, 134, 240);
     private static readonly Color FolderColor = Color.FromArgb(255, 215, 160, 58);
     private static readonly Color AppColor = Color.FromArgb(255, 151, 121, 242);
+    private static readonly Color BrowserColor = Color.FromArgb(255, 63, 174, 149);
 
     private bool _lpIsSelected;
     private bool _lpIsHovered;
@@ -1135,6 +1136,9 @@ public sealed class LpResultRow : INotifyPropertyChanged
     public string TimeText { get; init; } = string.Empty;
 
     public bool IsDirectory { get; init; }
+
+    /// <summary>浏览器书签 / 历史条目：Path 是 URL，结果行显示「网页」。</summary>
+    public bool IsBrowser { get; init; }
 
     public long Size { get; init; }
 
@@ -1208,18 +1212,22 @@ public sealed class LpResultRow : INotifyPropertyChanged
 
     public static LpResultRow FromDto(SearchHitDto lpDto, string lpQuery)
     {
-        var lpFolder = System.IO.Path.GetDirectoryName(lpDto.Path) ?? string.Empty;
-        var lpIsApp = !lpDto.IsDirectory && (lpDto.IsProgram || IsProgram(lpDto.Name));
-        var lpColor = lpDto.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
+        var lpBrowser = lpDto.IsBrowser;
+        var lpFolder = lpBrowser
+            ? lpDto.Path
+            : System.IO.Path.GetDirectoryName(lpDto.Path) ?? string.Empty;
+        var lpIsApp = !lpDto.IsDirectory && !lpBrowser && (lpDto.IsProgram || IsProgram(lpDto.Name));
+        var lpColor = lpBrowser ? BrowserColor : lpDto.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
         return new LpResultRow
         {
             Name = lpDto.Name,
             FullPath = lpDto.Path,
             FolderPath = lpFolder,
             Query = lpQuery,
-            Glyph = lpDto.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
-            Tag = lpDto.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
+            Glyph = lpBrowser ? "\uE774" : lpDto.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
+            Tag = lpBrowser ? "网页" : lpDto.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
             IsDirectory = lpDto.IsDirectory,
+            IsBrowser = lpBrowser,
             Size = lpDto.Size,
             ModifiedAt = lpDto.ModifiedAt,
             Tier = lpDto.Tier,
@@ -1232,18 +1240,24 @@ public sealed class LpResultRow : INotifyPropertyChanged
 
     public static LpResultRow FromRecent(RecentEntry lpEntry)
     {
-        var lpIsApp = !lpEntry.IsDirectory && IsProgram(lpEntry.Name);
-        var lpColor = lpEntry.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
+        var lpBrowser = !lpEntry.IsDirectory
+            && (lpEntry.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || lpEntry.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+        var lpIsApp = !lpEntry.IsDirectory && !lpBrowser && IsProgram(lpEntry.Name);
+        var lpColor = lpBrowser ? BrowserColor : lpEntry.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
         return new LpResultRow
         {
             Name = lpEntry.Name,
             FullPath = lpEntry.Path,
-            FolderPath = lpEntry.IsDirectory
-                ? System.IO.Path.GetDirectoryName(lpEntry.Path) ?? lpEntry.Path
-                : System.IO.Path.GetDirectoryName(lpEntry.Path) ?? string.Empty,
-            Glyph = lpEntry.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
-            Tag = lpEntry.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
+            FolderPath = lpBrowser
+                ? lpEntry.Path
+                : lpEntry.IsDirectory
+                    ? System.IO.Path.GetDirectoryName(lpEntry.Path) ?? lpEntry.Path
+                    : System.IO.Path.GetDirectoryName(lpEntry.Path) ?? string.Empty,
+            Glyph = lpBrowser ? "\uE774" : lpEntry.IsDirectory ? "\uE8B7" : (lpIsApp ? "\uE71D" : "\uE7C3"),
+            Tag = lpBrowser ? "网页" : lpEntry.IsDirectory ? "文件夹" : (lpIsApp ? "程序" : "文件"),
             IsDirectory = lpEntry.IsDirectory,
+            IsBrowser = lpBrowser,
             TimeText = RelativeTime(lpEntry.AccessedAt),
             IconForeground = new SolidColorBrush(lpColor),
             IconBackground = new SolidColorBrush(Color.FromArgb(26, lpColor.R, lpColor.G, lpColor.B)),
@@ -1256,6 +1270,7 @@ public sealed class LpResultRow : INotifyPropertyChanged
         Name = Name,
         Path = FullPath,
         IsDirectory = IsDirectory,
+        IsBrowser = IsBrowser,
         Size = Size,
         ModifiedAt = ModifiedAt,
         Tier = Tier,

@@ -330,6 +330,7 @@ public sealed class ServiceRuntime : IDisposable
                 Path = hit.Path,
                 IsDirectory = hit.IsDirectory,
                 IsProgram = hit.IsProgram,
+                IsBrowser = hit.IsBrowser,
                 Size = hit.Size,
                 ModifiedAt = hit.ModifiedAt?.ToString("O"),
                 Tier = hit.Tier,
