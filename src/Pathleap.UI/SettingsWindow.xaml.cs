@@ -27,6 +27,7 @@ public sealed partial class SettingsWindow : Window
     private bool _lpIndexBusy;
     private string _lpCurrentPage = "appearance";
     private bool _lpSyncingElevation;
+    private bool _lpSyncingScopeApps;
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
@@ -66,6 +67,9 @@ public sealed partial class SettingsWindow : Window
         _lpSyncingElevation = true;
         ElevationSwitch.IsOn = _lpConfig.AlwaysRunAsAdmin;
         _lpSyncingElevation = false;
+        _lpSyncingScopeApps = true;
+        ScopeAppsSwitch.IsOn = _lpConfig.IncludeInstalledPrograms;
+        _lpSyncingScopeApps = false;
         ApplyInstallInfo();
         RefreshElevationState();
 
@@ -509,6 +513,18 @@ public sealed partial class SettingsWindow : Window
         var lpValue = OpacitySlider.Value;
         OpacityValueText.Text = $"{lpValue * 100:0}%";
         _lpTheme.SetOpacity(lpValue);
+    }
+
+    private void OnScopeAppsToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingScopeApps)
+        {
+            return;
+        }
+
+        _lpConfig.IncludeInstalledPrograms = ScopeAppsSwitch.IsOn;
+        _lpTheme.SaveConfig();
+        AppLog.Info($"已安装程序搜索：{(ScopeAppsSwitch.IsOn ? "开" : "关")}（下一次搜索即生效）");
     }
 
     private void OnAcrylicToggled(object? sender, EventArgs e)

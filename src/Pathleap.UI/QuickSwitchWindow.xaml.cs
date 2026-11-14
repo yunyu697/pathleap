@@ -33,6 +33,7 @@ public sealed partial class QuickSwitchWindow : Window
     private const int SearchLimit = 6;
     private static readonly Color FolderColor = Color.FromArgb(255, 215, 160, 58);
     private static readonly Color FileColor = Color.FromArgb(255, 76, 134, 240);
+    private static readonly Color AppColor = Color.FromArgb(255, 151, 121, 242);
 
     private readonly AppConfig _lpConfig;
     private readonly List<QuickFolder> _lpFolders = new();
@@ -1402,7 +1403,8 @@ public sealed partial class QuickSwitchWindow : Window
     private Border BuildResultRow(int index, SearchHitDto hit)
     {
         var lpSelected = index == _lpResultSelected && _lpKeyboardActive;
-        var lpColor = hit.IsDirectory ? FolderColor : FileColor;
+        var lpIsProgram = !hit.IsDirectory && hit.IsProgram;
+        var lpColor = hit.IsDirectory ? FolderColor : (lpIsProgram ? AppColor : FileColor);
         var lpRow = new Border
         {
             Height = 28,
@@ -1432,7 +1434,7 @@ public sealed partial class QuickSwitchWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Child = new FontIcon
             {
-                Glyph = hit.IsDirectory ? "\uE8B7" : "\uE7C3",
+                Glyph = hit.IsDirectory ? "\uE8B7" : (lpIsProgram ? "\uE71D" : "\uE7C3"),
                 FontFamily = new FontFamily("Segoe Fluent Icons"),
                 FontSize = 10,
                 Foreground = new SolidColorBrush(lpColor)
@@ -1452,7 +1454,7 @@ public sealed partial class QuickSwitchWindow : Window
 
         var lpTag = new TextBlock
         {
-            Text = hit.IsDirectory ? "文件夹" : "文件",
+            Text = hit.IsDirectory ? "文件夹" : (lpIsProgram ? "程序" : "文件"),
             FontSize = 9,
             Foreground = ThemeService.Instance.Text3Brush,
             VerticalAlignment = VerticalAlignment.Center

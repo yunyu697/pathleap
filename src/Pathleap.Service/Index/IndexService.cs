@@ -17,7 +17,8 @@ namespace Pathleap.Service.Index;
 internal sealed class IndexService : IDisposable
 {
     private readonly object _lpGate = new();
-    private readonly ExclusionRules _lpExclusions = new();
+    private readonly SearchPreferences _lpPreferences = new();
+    private readonly InstalledProgramIndex _lpPrograms = new();
     private IndexSnapshot? _lpSnapshot;
     private SearchEngine? _lpEngine;
     private IndexStatusDto _lpStatus = new() { State = "not-built", Note = "尚未构建索引" };
@@ -368,17 +369,81 @@ internal sealed class IndexService : IDisposable
 
     public SearchOutcome? Search(string query, int limit, bool? directoriesOnly = null)
     {
-        // 排除规则按查询取一次快照（配置文件改了才重读），过滤在引擎取结果阶段完成。
-        var lpPrefixes = _lpExclusions.GetPrefixes();
-        Func<string, bool>? lpPathAllowed = lpPrefixes.Length == 0
+        // 偏好按查询取一次快照（配置文件改了才重读），过滤在引擎取结果阶段完成。
+        var lpPreferences = _lpPreferences.Get();
+        Func<string, bool>? lpPathAllowed = lpPreferences.ExcludedPrefixes.Length == 0
             ? null
-            : lpPath => !ExclusionRules.IsExcluded(lpPath, lpPrefixes);
+            : lpPath => !SearchPreferences.IsExcluded(lpPath, lpPreferences.ExcludedPrefixes);
 
+        SearchOutcome? lpOutcome;
         // 查询与快照释放互斥：查询只花几毫秒，串行化换来“重建时不会读到已释放的映射”。
         lock (_lpGate)
         {
-            return _lpEngine?.Search(query, limit, directoriesOnly, lpPathAllowed);
+            lpOutcome = _lpEngine?.Search(query, limit, directoriesOnly, lpPathAllowed);
         }
+
+        if (lpOutcome is null)
+        {
+            return null;
+        }
+
+        // 已安装程序与文件索引合并：程序通常在启动器场景里更相关，同 tier 时排在文件前。
+        if (lpPreferences.IncludeInstalledPrograms
+            && directoriesOnly != true
+            && !string.IsNullOrWhiteSpace(query))
+        {
+            var lpProgramHits = _lpPrograms.Match(query, limit, lpPathAllowed);
+            if (lpProgramHits.Count > 0)
+            {
+                MergeProgramHits(lpOutcome, lpProgramHits, limit);
+            }
+        }
+
+        return lpOutcome;
+    }
+
+    /// <summary>
+    /// 程序条目按路径去重后并进结果，再按 tier 稳定排序（程序先插入，同 tier 在前）。
+    /// 同一应用的重复快捷方式（用户/公共开始菜单各一份）只保留一条：文件命中里的 .lnk
+    /// 若与程序条目同名，也一并丢掉，避免结果里出现“draw.io”和“draw.io.lnk”两条。
+    /// </summary>
+    private static void MergeProgramHits(SearchOutcome outcome, List<SearchHit> programHits, int limit)
+    {
+        var lpSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lpProgramNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var lpMerged = new List<SearchHit>(programHits.Count + outcome.Hits.Count);
+        foreach (var lpHit in programHits)
+        {
+            lpProgramNames.Add(lpHit.Name);
+            if (lpSeen.Add(lpHit.Path))
+            {
+                lpMerged.Add(lpHit);
+            }
+        }
+
+        foreach (var lpHit in outcome.Hits)
+        {
+            if (!lpHit.IsDirectory
+                && lpHit.Name.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)
+                && lpProgramNames.Contains(System.IO.Path.GetFileNameWithoutExtension(lpHit.Name)))
+            {
+                continue;
+            }
+
+            if (lpSeen.Add(lpHit.Path))
+            {
+                lpMerged.Add(lpHit);
+            }
+        }
+
+        var lpTake = Math.Clamp(limit, 1, 500);
+        var lpOrdered = lpMerged
+            .OrderByDescending(static lpHit => lpHit.Tier)
+            .Take(lpTake)
+            .ToList();
+
+        outcome.Hits.Clear();
+        outcome.Hits.AddRange(lpOrdered);
     }
 
     public void Dispose()

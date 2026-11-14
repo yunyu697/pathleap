@@ -86,6 +86,9 @@ public sealed class AppConfig
     /// </summary>
     public List<string> ExcludedPaths { get; set; } = new();
 
+    /// <summary>是否把已安装程序（开始菜单快捷方式 + 注册表可启动项）并入搜索结果。</summary>
+    public bool IncludeInstalledPrograms { get; set; } = true;
+
     public void Normalize()
     {
         if (SchemaVersion < 2)

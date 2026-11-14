@@ -1209,7 +1209,7 @@ public sealed class LpResultRow : INotifyPropertyChanged
     public static LpResultRow FromDto(SearchHitDto lpDto, string lpQuery)
     {
         var lpFolder = System.IO.Path.GetDirectoryName(lpDto.Path) ?? string.Empty;
-        var lpIsApp = !lpDto.IsDirectory && IsProgram(lpDto.Name);
+        var lpIsApp = !lpDto.IsDirectory && (lpDto.IsProgram || IsProgram(lpDto.Name));
         var lpColor = lpDto.IsDirectory ? FolderColor : (lpIsApp ? AppColor : FileColor);
         return new LpResultRow
         {

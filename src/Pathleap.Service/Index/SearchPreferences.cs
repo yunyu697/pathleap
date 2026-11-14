@@ -4,21 +4,22 @@ using Pathleap.Shared.Diagnostics;
 
 namespace Pathleap.Service.Index;
 
+/// <summary>查询侧的用户偏好快照：排除前缀 + 是否包含已安装程序。</summary>
+internal sealed record SearchPreferencesSnapshot(string[] ExcludedPrefixes, bool IncludeInstalledPrograms);
+
 /// <summary>
-/// 用户配置（config.json）里的排除路径。按文件修改时间懒加载，查询时取一次快照：
-/// 命中「等于该目录」或「以该目录 + 分隔符开头」的结果被过滤。
-/// 这样设置页新增/删除规则后无需重建索引，下一次查询即生效。
+/// 用户配置（config.json）里的查询偏好。按文件修改时间懒加载，查询时取一次快照：
+/// 设置页改动后无需重启服务或重建索引，下一次查询即生效。
 /// </summary>
-internal sealed class ExclusionRules
+internal sealed class SearchPreferences
 {
     private readonly string _lpConfigPath = AppPaths.ConfigFile;
     private readonly object _lpGate = new();
-    private string[] _lpPrefixes = Array.Empty<string>();
+    private SearchPreferencesSnapshot _lpSnapshot = new(Array.Empty<string>(), true);
     private DateTime _lpStamp = DateTime.MinValue;
     private bool _lpLoaded;
 
-    /// <summary>规范化后的排除前缀（去掉末尾分隔符，不区分大小写去重）。</summary>
-    public string[] GetPrefixes()
+    public SearchPreferencesSnapshot Get()
     {
         lock (_lpGate)
         {
@@ -30,26 +31,26 @@ internal sealed class ExclusionRules
                 if (!_lpLoaded || lpStamp != _lpStamp)
                 {
                     var lpConfig = ConfigStore.Load(_lpConfigPath);
-                    var lpBefore = _lpPrefixes.Length;
-                    _lpPrefixes = Normalize(lpConfig.ExcludedPaths);
+                    _lpSnapshot = new SearchPreferencesSnapshot(
+                        Normalize(lpConfig.ExcludedPaths),
+                        lpConfig.IncludeInstalledPrograms);
                     _lpStamp = lpStamp;
                     _lpLoaded = true;
-                    if (_lpPrefixes.Length != lpBefore || lpBefore == 0)
-                    {
-                        AppLog.Info($"排除规则已加载：{_lpPrefixes.Length} 条" +
-                                    (_lpPrefixes.Length == 0
-                                        ? string.Empty
-                                        : "（" + string.Join("；", _lpPrefixes) + "）"));
-                    }
+                    AppLog.Info(
+                        $"搜索偏好已加载：排除 {_lpSnapshot.ExcludedPrefixes.Length} 条，" +
+                        $"已安装程序 {(_lpSnapshot.IncludeInstalledPrograms ? "开" : "关")}" +
+                        (_lpSnapshot.ExcludedPrefixes.Length == 0
+                            ? string.Empty
+                            : "（" + string.Join("；", _lpSnapshot.ExcludedPrefixes) + "）"));
                 }
             }
             catch (Exception ex)
             {
-                // 配置读取失败不应打断搜索：退回「无排除」，并记日志。
-                AppLog.Warn($"排除规则读取失败，按未配置排除处理: {ex.Message}");
+                // 配置读取失败不应打断搜索：退回「无排除、含程序」，并记日志。
+                AppLog.Warn($"搜索偏好读取失败，按默认值处理: {ex.Message}");
             }
 
-            return _lpPrefixes;
+            return _lpSnapshot;
         }
     }
 
