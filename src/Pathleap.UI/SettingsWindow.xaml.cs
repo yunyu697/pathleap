@@ -29,6 +29,7 @@ public sealed partial class SettingsWindow : Window
     private bool _lpSyncingElevation;
     private bool _lpSyncingScopeApps;
     private bool _lpSyncingScopeBrowser;
+    private bool _lpSyncingNetwork;
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
@@ -74,6 +75,11 @@ public sealed partial class SettingsWindow : Window
         _lpSyncingScopeBrowser = true;
         ScopeBrowserSwitch.IsOn = _lpConfig.IncludeBrowserHistory;
         _lpSyncingScopeBrowser = false;
+        _lpSyncingNetwork = true;
+        ScopeNetworkSwitch.IsOn = _lpConfig.IncludeNetworkLocations;
+        _lpSyncingNetwork = false;
+        NetworkPanel.Visibility = _lpConfig.IncludeNetworkLocations ? Visibility.Visible : Visibility.Collapsed;
+        RefreshNetworkLocations();
         ApplyInstallInfo();
         RefreshElevationState();
 
@@ -541,6 +547,210 @@ public sealed partial class SettingsWindow : Window
         _lpConfig.IncludeBrowserHistory = ScopeBrowserSwitch.IsOn;
         _lpTheme.SaveConfig();
         AppLog.Info($"浏览器历史与书签搜索：{(ScopeBrowserSwitch.IsOn ? "开" : "关")}（下一次搜索即生效）");
+    }
+
+    private void OnScopeNetworkToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingNetwork)
+        {
+            return;
+        }
+
+        _lpConfig.IncludeNetworkLocations = ScopeNetworkSwitch.IsOn;
+        _lpTheme.SaveConfig();
+        NetworkPanel.Visibility = ScopeNetworkSwitch.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        NetworkStatusText.Text = ScopeNetworkSwitch.IsOn
+            ? "已开启，正在后台建立网络位置索引…"
+            : "已关闭，正在清空网络位置索引…";
+        AppLog.Info($"网络位置搜索：{(_lpConfig.IncludeNetworkLocations ? "开" : "关")}");
+        RefreshNetworkLocations();
+        _ = RequestExtrasBuildAsync();
+    }
+
+    /// <summary>网络位置开关打开时显示已映射盘（自动包含）与用户添加的共享，附删除按钮。</summary>
+    private void RefreshNetworkLocations()
+    {
+        NetworkLocationPanel.Children.Clear();
+
+        var lpMapped = new List<string>();
+        try
+        {
+            foreach (var lpDrive in DriveInfo.GetDrives())
+            {
+                if (lpDrive.DriveType == DriveType.Network)
+                {
+                    lpMapped.Add(lpDrive.Name.TrimEnd('\\'));
+                }
+            }
+        }
+        catch (IOException)
+        {
+            // 枚举失败时只是不显示映射盘，不影响手动添加的共享。
+        }
+
+        NetworkMappedText.Text = lpMapped.Count == 0
+            ? "未检测到已映射的网络驱动器。"
+            : "已映射、将自动包含：" + string.Join("、", lpMapped);
+
+        if (_lpConfig.NetworkLocations.Count == 0)
+        {
+            NetworkLocationPanel.Children.Add(new TextBlock
+            {
+                Text = "尚未添加共享路径",
+                FontSize = 10.5,
+                Foreground = _lpTheme.Text3Brush
+            });
+            return;
+        }
+
+        foreach (var lpLocation in _lpConfig.NetworkLocations)
+        {
+            NetworkLocationPanel.Children.Add(BuildNetworkRow(lpLocation));
+        }
+    }
+
+    private Border BuildNetworkRow(string location)
+    {
+        var lpText = new TextBlock
+        {
+            Text = location,
+            FontSize = 11,
+            Foreground = _lpTheme.Text1Brush,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(lpText, location);
+
+        var lpRemove = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE711", FontSize = 10 },
+            Background = _lpTheme.TransparentBrush,
+            BorderBrush = _lpTheme.TransparentBrush,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6, 0, 6, 0),
+            Height = 24,
+            MinWidth = 28,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = location
+        };
+        AutomationProperties.SetName(lpRemove, $"移除网络位置 {location}");
+        ToolTipService.SetToolTip(lpRemove, "移除");
+        lpRemove.Click += OnRemoveNetworkLocationClick;
+
+        var lpRow = new Grid();
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        lpRow.Children.Add(lpText);
+        Grid.SetColumn(lpRemove, 1);
+        lpRow.Children.Add(lpRemove);
+
+        return new Border
+        {
+            Background = _lpTheme.Surface2Brush,
+            BorderBrush = _lpTheme.Border1Brush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10, 4, 4, 4),
+            Child = lpRow
+        };
+    }
+
+    private void OnAddNetworkLocationClick(object sender, RoutedEventArgs e)
+    {
+        var lpInput = NetworkPathBox.Text.Trim();
+        if (lpInput.Length == 0)
+        {
+            NetworkStatusText.Text = "请输入共享路径，例如 \\\\NAS\\Media";
+            return;
+        }
+
+        if (!lpInput.StartsWith(@"\\", StringComparison.Ordinal) && !Path.IsPathRooted(lpInput))
+        {
+            NetworkStatusText.Text = "请输入 UNC 共享路径（\\\\服务器\\共享）或盘符路径";
+            return;
+        }
+
+        string lpFullPath;
+        try
+        {
+            lpFullPath = Path.GetFullPath(lpInput).TrimEnd('\\');
+        }
+        catch (Exception ex)
+        {
+            NetworkStatusText.Text = "路径无效：" + ex.Message;
+            return;
+        }
+
+        // 网络盘离线是常态：不可访问时也允许保存，构建时会跳过并在日志里说明。
+        if (!Directory.Exists(lpFullPath))
+        {
+            NetworkStatusText.Text = $"路径当前不可访问，仍会保存：{lpFullPath}";
+        }
+
+        if (_lpConfig.NetworkLocations.Any(lpExisting =>
+                string.Equals(lpExisting.TrimEnd('\\'), lpFullPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            NetworkStatusText.Text = "该位置已在列表中";
+            return;
+        }
+
+        _lpConfig.NetworkLocations.Add(lpFullPath);
+        _lpTheme.SaveConfig();
+        NetworkPathBox.Text = string.Empty;
+        NetworkStatusText.Text = _lpConfig.IncludeNetworkLocations
+            ? $"已添加：{lpFullPath}（正在后台建立索引）"
+            : $"已添加：{lpFullPath}（打开开关后才会索引）";
+        RefreshNetworkLocations();
+        AppLog.Info($"网络位置已添加: {lpFullPath}");
+        if (_lpConfig.IncludeNetworkLocations)
+        {
+            _ = RequestExtrasBuildAsync();
+        }
+    }
+
+    private void OnRemoveNetworkLocationClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string lpLocation })
+        {
+            return;
+        }
+
+        var lpIndex = _lpConfig.NetworkLocations.FindIndex(lpExisting =>
+            string.Equals(lpExisting.TrimEnd('\\'), lpLocation.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+        if (lpIndex < 0)
+        {
+            return;
+        }
+
+        _lpConfig.NetworkLocations.RemoveAt(lpIndex);
+        _lpTheme.SaveConfig();
+        NetworkStatusText.Text = $"已移除：{lpLocation}";
+        RefreshNetworkLocations();
+        AppLog.Info($"网络位置已移除: {lpLocation}");
+        if (_lpConfig.IncludeNetworkLocations)
+        {
+            _ = RequestExtrasBuildAsync();
+        }
+    }
+
+    /// <summary>请求服务端按当前配置重建附加索引；成功后取消旧映射并重新装载。</summary>
+    private async Task RequestExtrasBuildAsync()
+    {
+        try
+        {
+            var lpReply = await PipeClient.SendAsync(
+                Branding.ServicePipeName,
+                new IpcRequest { Command = "INDEX_EXTRAS" },
+                TimeSpan.FromSeconds(10));
+            if (!lpReply.Ok)
+            {
+                NetworkStatusText.Text = "重建网络索引失败：" + lpReply.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            NetworkStatusText.Text = "重建网络索引失败：" + ex.Message;
+        }
     }
 
     private void OnAcrylicToggled(object? sender, EventArgs e)

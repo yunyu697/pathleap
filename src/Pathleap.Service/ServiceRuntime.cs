@@ -1,4 +1,5 @@
 using Pathleap.Shared;
+using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Index;
 using Pathleap.Shared.Ipc;
@@ -48,9 +49,11 @@ public sealed class ServiceRuntime : IDisposable
         AppLog.Info($"服务配置: {AppPaths.ServiceConfigFile}");
         AppLog.Info($"索引目录: {AppPaths.IndexRoot}");
         _lpIndex.LoadLatest();
+        _lpIndex.LoadExtras();
 
         // 不阻塞管道启动：先让 UI 能连上并读到「构建中 + 进度」，构建在后台自行推进。
         _lpAutoBuildTask = Task.Run(() => AutoBuildIfNeeded(_lpCts.Token));
+        _ = Task.Run(() => EnsureExtrasIfNeeded(_lpCts.Token));
 
         _lpIndex.BuildFinished += StartJournalWatchIfUsn;
         StartJournalWatchIfUsn();
@@ -92,10 +95,53 @@ public sealed class ServiceRuntime : IDisposable
     }
 
     /// <summary>
-    /// 只有在索引来源是 USN 时才启用运行期自动刷新：USN 日志告诉我们「有变化」，
-    /// 安静 60 秒后自动重建（不是逐条打补丁，索引格式仍是一次性快照）。
-    /// 目录遍历模式、拿不到卷句柄（非管理员）都明确记日志，运行期变更仍需手动重建。
+    /// 附加索引自检：网络位置关闭时清掉旧文件；开启且文件缺失或早于配置改动时，后台重建一次。
+    /// 不做实时监听，共享盘上的新增文件需要重新保存设置或重建索引才会出现。
     /// </summary>
+    private void EnsureExtrasIfNeeded(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var lpConfig = ConfigStore.Load(AppPaths.ConfigFile);
+            var lpRoots = ExtrasIndexRoots.Resolve(lpConfig);
+            var lpExtrasFile = _lpIndex.ExtrasFilePath;
+            if (lpRoots.Count == 0)
+            {
+                if (File.Exists(lpExtrasFile))
+                {
+                    AppLog.Info("网络位置未启用，清空附加索引");
+                    _lpIndex.StartExtrasBuildAsync(Array.Empty<string>(), cancellationToken).GetAwaiter().GetResult();
+                }
+
+                return;
+            }
+
+            var lpStale = !File.Exists(lpExtrasFile)
+                          || (File.Exists(AppPaths.ConfigFile)
+                              && File.GetLastWriteTimeUtc(lpExtrasFile) < File.GetLastWriteTimeUtc(AppPaths.ConfigFile));
+            if (!lpStale)
+            {
+                AppLog.Info($"附加索引无需重建：{lpRoots.Count} 个根");
+                return;
+            }
+
+            AppLog.Info($"附加索引启动重建：{lpRoots.Count} 个根（{string.Join("；", lpRoots)}）");
+            var lpResult = _lpIndex.StartExtrasBuildAsync(lpRoots, cancellationToken).GetAwaiter().GetResult();
+            if (lpResult is not null)
+            {
+                AppLog.Info($"附加索引构建完成：{lpResult.EntryCount:N0} 条，{lpResult.BuildMs:0}ms，{lpResult.Source}");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppLog.Info("附加索引构建已取消（服务停止）");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"附加索引构建失败: {ex.Message}");
+        }
+    }
+
     private void StartJournalWatchIfUsn()
     {
         try
@@ -283,6 +329,9 @@ public sealed class ServiceRuntime : IDisposable
             case "INDEX_BUILD":
                 return Task.Run(() => BuildIndex(request));
 
+            case "INDEX_EXTRAS":
+                return Task.Run(BuildExtras);
+
             case "SEARCH":
                 return Task.FromResult(SearchIndex(request));
 
@@ -394,6 +443,44 @@ public sealed class ServiceRuntime : IDisposable
                 Message = "索引构建失败: " + ex.Message,
                 Index = _lpIndex.Status
             };
+        }
+    }
+
+    private IpcReply BuildExtras()
+    {
+        try
+        {
+            if (_lpIndex.BuildingExtras)
+            {
+                return IpcReply.Failure("附加索引正在构建中");
+            }
+
+            var lpConfig = ConfigStore.Load(AppPaths.ConfigFile);
+            var lpRoots = ExtrasIndexRoots.Resolve(lpConfig);
+            _ = _lpIndex.StartExtrasBuildAsync(lpRoots, _lpCts.Token)
+                .ContinueWith(static task =>
+                {
+                    if (task.IsFaulted)
+                    {
+                        AppLog.Error("附加索引构建失败", task.Exception.GetBaseException());
+                    }
+                    else if (task.IsCanceled)
+                    {
+                        AppLog.Info("附加索引构建已取消（服务停止）");
+                    }
+                }, TaskScheduler.Default);
+
+            return new IpcReply
+            {
+                Ok = true,
+                Message = $"extras-started:{lpRoots.Count}",
+                Index = _lpIndex.Status
+            };
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("附加索引构建启动失败", ex);
+            return IpcReply.Failure("附加索引构建失败: " + ex.Message);
         }
     }
 

@@ -639,7 +639,7 @@
                                            FontSize="20"
                                            FontWeight="SemiBold"
                                            Foreground="{ThemeResource Text1Brush}" />
-                                <TextBlock Text="当前索引单个卷的根目录；索引目录与网络位置暂不可增删。"
+                                <TextBlock Text="当前索引单个卷的根目录；附加目录暂不可增删。"
                                            FontSize="11"
                                            Foreground="{ThemeResource Text3Brush}"
                                            Margin="0,5,0,0" />
@@ -706,14 +706,40 @@
                                         <FontIcon Glyph="&#xE968;" FontSize="13" Foreground="{ThemeResource Text2Brush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="网络位置" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
-                                            <TextBlock Text="未接入" FontSize="9" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="已映射的网络驱动器与 NAS" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
+                                        <TextBlock Text="网络位置" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock Text="已映射的网络驱动器会自动包含；可补充 NAS / 共享路径" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
                                     </StackPanel>
-                                    <controls:LpSwitch x:Name="ScopeNetworkSwitch" Grid.Column="2" IsOn="False" IsEnabled="False" VerticalAlignment="Center" />
+                                    <controls:LpSwitch x:Name="ScopeNetworkSwitch" Grid.Column="2" IsOn="False" VerticalAlignment="Center"
+                                                       AutomationProperties.Name="网络位置搜索开关" Toggled="OnScopeNetworkToggled" />
                                 </Grid>
+
+                                <StackPanel x:Name="NetworkPanel" Spacing="6" Margin="0,6,0,0" Visibility="Collapsed">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="NetworkPathBox"
+                                                 PlaceholderText="共享路径，例如 \\NAS\Media"
+                                                 FontSize="11.5"
+                                                 Height="32"
+                                                 VerticalAlignment="Center" />
+                                        <Button x:Name="NetworkAddButton"
+                                                Grid.Column="1"
+                                                Content="添加"
+                                                Style="{StaticResource LpGhostButtonStyle}"
+                                                Click="OnAddNetworkLocationClick" />
+                                    </Grid>
+                                    <TextBlock x:Name="NetworkMappedText"
+                                               FontSize="10"
+                                               Foreground="{ThemeResource Text3Brush}"
+                                               TextWrapping="Wrap" />
+                                    <TextBlock x:Name="NetworkStatusText"
+                                               FontSize="10"
+                                               Foreground="{ThemeResource Text3Brush}"
+                                               TextWrapping="Wrap" />
+                                    <StackPanel x:Name="NetworkLocationPanel" Spacing="6" />
+                                </StackPanel>
 
                                 <TextBlock Text="索引位置"
                                            Style="{StaticResource LpSectionLabelStyle}"

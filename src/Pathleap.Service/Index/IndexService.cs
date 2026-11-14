@@ -22,10 +22,18 @@ internal sealed class IndexService : IDisposable
     private readonly BrowserIndex _lpBrowser = new();
     private IndexSnapshot? _lpSnapshot;
     private SearchEngine? _lpEngine;
+    private IndexSnapshot? _lpExtraSnapshot;
+    private SearchEngine? _lpExtraEngine;
+    private int _lpExtrasBuildFlag;
     private IndexStatusDto _lpStatus = new() { State = "not-built", Note = "尚未构建索引" };
     private int _lpBuildFlag;
 
     public bool Building => Volatile.Read(ref _lpBuildFlag) == 1;
+
+    /// <summary>附加索引（网络位置 / 附加目录）文件路径，与主索引分开存放，装载时也不会被当成主索引。</summary>
+    public string ExtrasFilePath => System.IO.Path.Combine(AppPaths.IndexRoot, "extras.plidx");
+
+    public bool BuildingExtras => Volatile.Read(ref _lpExtrasBuildFlag) == 1;
 
     /// <summary>最近一次构建使用的根与模式，运行期自动刷新沿用同样的范围。</summary>
     public string LastBuildRoot { get; private set; } = string.Empty;
@@ -74,7 +82,10 @@ internal sealed class IndexService : IDisposable
     public bool LoadLatest()
     {
         Directory.CreateDirectory(AppPaths.IndexRoot);
-        var lpFiles = Directory.EnumerateFiles(AppPaths.IndexRoot, "*.plidx").ToList();
+        var lpFiles = Directory.EnumerateFiles(AppPaths.IndexRoot, "*.plidx")
+            .Where(lpFile => !string.Equals(
+                System.IO.Path.GetFileName(lpFile), "extras.plidx", StringComparison.OrdinalIgnoreCase))
+            .ToList();
         if (lpFiles.Count == 0)
         {
             AppLog.Info("未找到已有索引，等待自动构建。");
@@ -134,6 +145,97 @@ internal sealed class IndexService : IDisposable
             }
 
             return false;
+        }
+    }
+
+    /// <summary>装载附加索引（网络位置 / 附加目录）；文件不存在或损坏时只是没有附加结果，不影响主索引。</summary>
+    public bool LoadExtras()
+    {
+        var lpPath = ExtrasFilePath;
+        if (!File.Exists(lpPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var lpSnapshot = IndexSnapshot.Open(lpPath);
+            lock (_lpGate)
+            {
+                _lpExtraSnapshot?.Dispose();
+                _lpExtraSnapshot = lpSnapshot;
+                _lpExtraEngine = new SearchEngine(lpSnapshot);
+            }
+
+            AppLog.Info($"附加索引已装载：{lpPath}，{lpSnapshot.EntryCount} 条，来源 {lpSnapshot.Source}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"附加索引装载失败（{lpPath}）: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 按给定根重建附加索引（目录遍历，多根写入同一快照）。在后台任务里跑，返回时已装载。
+    /// 根为空表示清空附加索引；网络盘离线导致某根不可访问时，该根会被跳过而不是整体失败。
+    /// </summary>
+    public Task<IndexBuildResult?> StartExtrasBuildAsync(
+        IReadOnlyList<string> roots,
+        CancellationToken cancellationToken)
+    {
+        if (Interlocked.CompareExchange(ref _lpExtrasBuildFlag, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("附加索引正在构建中，请稍后再试");
+        }
+
+        return Task.Run<IndexBuildResult?>(() =>
+        {
+            try
+            {
+                ReleaseExtras();
+                if (roots.Count == 0)
+                {
+                    TryDeleteExtrasFile();
+                    AppLog.Info("附加索引已清空：没有启用的网络位置或附加目录");
+                    return null;
+                }
+
+                Directory.CreateDirectory(AppPaths.IndexRoot);
+                var lpResult = DirectoryIndexSource.BuildMany(roots, ExtrasFilePath, null, cancellationToken);
+                LoadExtras();
+                return lpResult;
+            }
+            finally
+            {
+                Volatile.Write(ref _lpExtrasBuildFlag, 0);
+            }
+        }, cancellationToken);
+    }
+
+    private void ReleaseExtras()
+    {
+        lock (_lpGate)
+        {
+            _lpExtraSnapshot?.Dispose();
+            _lpExtraSnapshot = null;
+            _lpExtraEngine = null;
+        }
+    }
+
+    private void TryDeleteExtrasFile()
+    {
+        try
+        {
+            if (File.Exists(ExtrasFilePath))
+            {
+                File.Delete(ExtrasFilePath);
+            }
+        }
+        catch (IOException ex)
+        {
+            AppLog.Warn($"附加索引文件删除失败: {ex.Message}");
         }
     }
 
@@ -381,6 +483,15 @@ internal sealed class IndexService : IDisposable
         lock (_lpGate)
         {
             lpOutcome = _lpEngine?.Search(query, limit, directoriesOnly, lpPathAllowed);
+            var lpExtraOutcome = _lpExtraEngine?.Search(query, limit, directoriesOnly, lpPathAllowed);
+            if (lpOutcome is null)
+            {
+                lpOutcome = lpExtraOutcome;
+            }
+            else if (lpExtraOutcome is not null)
+            {
+                MergeOutcomeHits(lpOutcome, lpExtraOutcome, limit);
+            }
         }
 
         if (lpOutcome is null)
@@ -410,6 +521,26 @@ internal sealed class IndexService : IDisposable
         }
 
         return lpOutcome;
+    }
+
+    /// <summary>把附加索引（网络位置 / 附加目录）的命中按路径并进主索引结果；路径重叠时主索引优先。</summary>
+    private static void MergeOutcomeHits(SearchOutcome target, SearchOutcome extra, int limit)
+    {
+        var lpSeen = new HashSet<string>(
+            target.Hits.Select(static lpHit => lpHit.Path),
+            StringComparer.OrdinalIgnoreCase);
+        var lpMerged = new List<SearchHit>(target.Hits);
+        foreach (var lpHit in extra.Hits)
+        {
+            if (lpSeen.Add(lpHit.Path))
+            {
+                lpMerged.Add(lpHit);
+            }
+        }
+
+        var lpTake = Math.Clamp(limit, 1, 500);
+        target.Hits.Clear();
+        target.Hits.AddRange(lpMerged.OrderByDescending(static lpHit => lpHit.Tier).Take(lpTake));
     }
 
     /// <summary>
@@ -467,6 +598,9 @@ internal sealed class IndexService : IDisposable
             _lpSnapshot?.Dispose();
             _lpSnapshot = null;
             _lpEngine = null;
+            _lpExtraSnapshot?.Dispose();
+            _lpExtraSnapshot = null;
+            _lpExtraEngine = null;
         }
     }
 }

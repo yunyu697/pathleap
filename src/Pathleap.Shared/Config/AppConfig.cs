@@ -95,6 +95,15 @@ public sealed class AppConfig
     /// </summary>
     public bool IncludeBrowserHistory { get; set; }
 
+    /// <summary>
+    /// 是否把网络位置并入附加索引：已映射的网络驱动器自动包含，另加 <see cref="NetworkLocations"/> 里的共享路径。
+    /// 只做目录遍历、不做实时监听；映射盘离线时会被跳过。
+    /// </summary>
+    public bool IncludeNetworkLocations { get; set; }
+
+    /// <summary>用户手动添加的网络共享路径（\\server\share 或盘符）：只在该开关打开时参与附加索引。</summary>
+    public List<string> NetworkLocations { get; set; } = new();
+
     public void Normalize()
     {
         if (SchemaVersion < 2)
@@ -159,6 +168,12 @@ public sealed class AppConfig
         ExcludedPaths = (ExcludedPaths ?? new List<string>())
             .Where(static lpPath => !string.IsNullOrWhiteSpace(lpPath))
             .Select(static lpPath => lpPath.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        NetworkLocations = (NetworkLocations ?? new List<string>())
+            .Where(static lpPath => !string.IsNullOrWhiteSpace(lpPath))
+            .Select(static lpPath => lpPath.Trim().TrimEnd('\\'))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
