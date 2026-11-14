@@ -79,7 +79,7 @@ public sealed class SearchEngine
 
     public IndexSnapshot Snapshot => _lpSnapshot;
 
-    public SearchOutcome Search(string query, int limit)
+    public SearchOutcome Search(string query, int limit, bool? directoriesOnly = null)
     {
         var lpStarted = Stopwatch.GetTimestamp();
         var lpOutcome = new SearchOutcome { Query = query };
@@ -107,7 +107,7 @@ public sealed class SearchEngine
         }
 
         lpOutcome.CandidateCount = lpBuckets.Count;
-        var lpTake = Math.Min(Math.Clamp(limit, 1, 500), lpBuckets.Count);
+        var lpTake = Math.Clamp(limit, 1, 500);
         foreach (var (lpIndex, lpTier) in lpBuckets.EnumerateOrdered())
         {
             if (lpOutcome.Hits.Count >= lpTake)
@@ -116,6 +116,10 @@ public sealed class SearchEngine
             }
 
             var lpRecord = _lpSnapshot.GetRecord(lpIndex);
+            if (directoriesOnly is { } lpWantDirectory && lpRecord.IsDirectory != lpWantDirectory)
+            {
+                continue;
+            }
             var lpHit = new SearchHit
             {
                 Name = _lpSnapshot.DecodeNameAt(lpIndex),

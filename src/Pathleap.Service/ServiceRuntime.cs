@@ -294,7 +294,13 @@ public sealed class ServiceRuntime : IDisposable
     private IpcReply SearchIndex(IpcRequest request)
     {
         var lpStarted = System.Diagnostics.Stopwatch.GetTimestamp();
-        var lpOutcome = _lpIndex.Search(request.Query, request.Limit > 0 ? request.Limit : 30);
+        var lpDirectoriesOnly = request.Scope switch
+        {
+            "folder" => (bool?)true,
+            "file" => (bool?)false,
+            _ => null
+        };
+        var lpOutcome = _lpIndex.Search(request.Query, request.Limit > 0 ? request.Limit : 30, lpDirectoriesOnly);
         if (lpOutcome is null)
         {
             // 冷启动没有旧索引可搜：把「构建中 + 已扫描条目」返回给 UI 显示进度，而不是干巴巴的失败。

@@ -61,6 +61,9 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _lpIndexPoll;
     private IndexStatusDto? _lpIndexStatus;
 
+    /// <summary>搜索结果范围：all=全部、file=仅文件、folder=仅文件夹；仅本次会话有效。</summary>
+    private string _lpScope = "all";
+
     /// <summary>设置 / 快速切换 / 检查更新 / 关于由 App 接管（避免窗口互相直接引用）。</summary>
     public event Action? SettingsRequested;
 
@@ -85,6 +88,9 @@ public sealed partial class MainWindow : Window
         _lpTheme.Changed += OnThemeChanged;
 
         SearchBox.KeyDown += OnSearchKeyDown;
+        // Tab 在 WinUI 里先被焦点导航消费，连 PreviewKeyDown 都收不到；
+        // 根元素用 handledEventsToo 兜底，保证 Tab 一定落到范围切换上。
+        RootGrid.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(OnRootKeyDown), true);
         SearchBox.GotFocus += OnSearchGotFocus;
         SearchBox.TextChanged += OnSearchTextChanged;
         CompositionTarget.Rendering += OnRendering;
@@ -510,6 +516,40 @@ public sealed partial class MainWindow : Window
         _lpActiveSample.RecordWindowState(_lpHwnd);
     }
 
+    /// <summary>
+    /// Tab：在 全部 → 文件 → 文件夹 之间循环。焦点导航已先把焦点移走，
+    /// 这里拦下事件并把焦点还给搜索框；空输入只更新提示，不触发搜索。
+    /// </summary>
+    private void OnRootKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Tab)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        SearchBox.Focus(FocusState.Programmatic);
+        _lpScope = _lpScope switch
+        {
+            "all" => "file",
+            "file" => "folder",
+            _ => "all"
+        };
+        ScopeHintText.Text = _lpScope switch
+        {
+            "file" => "范围：文件",
+            "folder" => "范围：文件夹",
+            _ => "范围：全部"
+        };
+        if (string.IsNullOrWhiteSpace(SearchBox.Text))
+        {
+            ShowHome();
+            return;
+        }
+
+        _ = RunSearchAsync(SearchBox.Text);
+    }
+
     private void OnSearchKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (_lpActiveSample is not null && !_lpActiveSample.InputDelivered)
@@ -633,7 +673,13 @@ public sealed partial class MainWindow : Window
         var lpGeneration = ++_lpQueryGeneration;
         try
         {
-            var lpRequest = new IpcRequest { Command = "SEARCH", Query = lpQuery, Limit = SearchLimit };
+            var lpRequest = new IpcRequest
+            {
+                Command = "SEARCH",
+                Query = lpQuery,
+                Limit = SearchLimit,
+                Scope = _lpScope == "all" ? string.Empty : _lpScope
+            };
             var lpReply = await PipeClient.SendAsync(Branding.ServicePipeName, lpRequest, TimeSpan.FromSeconds(5));
 
             if (lpGeneration != _lpQueryGeneration)

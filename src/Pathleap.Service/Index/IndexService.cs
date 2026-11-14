@@ -365,12 +365,12 @@ internal sealed class IndexService : IDisposable
         }
     }
 
-    public SearchOutcome? Search(string query, int limit)
+    public SearchOutcome? Search(string query, int limit, bool? directoriesOnly = null)
     {
         // 查询与快照释放互斥：查询只花几毫秒，串行化换来“重建时不会读到已释放的映射”。
         lock (_lpGate)
         {
-            return _lpEngine?.Search(query, limit);
+            return _lpEngine?.Search(query, limit, directoriesOnly);
         }
     }
 

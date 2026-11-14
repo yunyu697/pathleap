@@ -23,6 +23,9 @@ public sealed class IpcRequest
     /// <summary>SEARCH 返回条数上限。</summary>
     public int Limit { get; set; }
 
+    /// <summary>SEARCH 的条目类型过滤：留空=全部，file=仅文件，folder=仅目录。</summary>
+    public string Scope { get; set; } = string.Empty;
+
     /// <summary>INDEX_BUILD 的目标：卷（C:）或目录（D:\work）。留空由服务端决定。</summary>
     public string Root { get; set; } = string.Empty;
 

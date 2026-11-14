@@ -376,6 +376,23 @@
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                 <Border Style="{StaticResource LpKbdStyle}" BorderThickness="1,1,1,2" MinWidth="25">
+                                    <TextBlock Text="Tab"
+                                               FontFamily="Consolas"
+                                               FontSize="9.5"
+                                               Foreground="{ThemeResource Text2Brush}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock x:Name="ScopeHintText"
+                                           Text="范围：全部"
+                                           FontSize="10.5"
+                                           CharacterSpacing="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           VerticalAlignment="Center"
+                                           Margin="2,0,0,0" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <Border Style="{StaticResource LpKbdStyle}" BorderThickness="1,1,1,2" MinWidth="25">
                                     <TextBlock Text="Esc"
                                                FontFamily="Consolas"
                                                FontSize="9.5"
