@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
+using Pathleap.Shared.Update;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Update;
 using Windows.Graphics;
@@ -310,10 +311,13 @@ public sealed partial class UpdateWindow : Window
         _lpPreview = false;
         PreviewBadge.Visibility = Visibility.Collapsed;
         CheckButton.IsEnabled = false;
-        IdleLastText.Text = "正在读取主仓库最新 Release 的清单并验签…";
+        var lpChannel = ReleaseFeed.NormalizeChannel(_lpConfig.UpdateChannel);
+        IdleLastText.Text = lpChannel == ReleaseFeed.ChannelPreview
+            ? "正在读取预览通道最新预发布版的清单并验签…"
+            : "正在读取主仓库最新 Release 的清单并验签…";
         IdleLastText.Foreground = Theme.ThemeService.Instance.Text3Brush;
 
-        var lpResult = await UpdateService.CheckAsync();
+        var lpResult = await UpdateService.CheckAsync(lpChannel);
         _lpBusy = false;
         _lpConfig.LastUpdateCheck = DateTimeOffset.Now.ToString("O");
         Theme.ThemeService.Instance.SaveConfig();

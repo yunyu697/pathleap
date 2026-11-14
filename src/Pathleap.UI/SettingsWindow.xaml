@@ -1029,17 +1029,19 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="更新通道" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
-                                            <TextBlock Text="预览版（未接入）" FontSize="9" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="当前只读取稳定版清单，不提供通道切换" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" />
+                                        <TextBlock Text="更新通道" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock x:Name="ChannelStatusText"
+                                                   Text="当前读取稳定版清单"
+                                                   FontSize="10.5"
+                                                   Foreground="{ThemeResource Text3Brush}" />
                                     </StackPanel>
-                                    <TextBlock Grid.Column="1"
-                                               Text="稳定版"
-                                               FontSize="11"
-                                               Foreground="{ThemeResource Text2Brush}"
-                                               VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <TextBlock Text="预览版" FontSize="10.5" Foreground="{ThemeResource Text2Brush}" VerticalAlignment="Center" />
+                                        <controls:LpSwitch x:Name="PreviewChannelSwitch"
+                                                           AutomationProperties.Name="预览版通道"
+                                                           VerticalAlignment="Center"
+                                                           Toggled="OnPreviewChannelToggled" />
+                                    </StackPanel>
                                 </Grid>
 
                                 <Grid Margin="0,10,0,4" ColumnSpacing="12">

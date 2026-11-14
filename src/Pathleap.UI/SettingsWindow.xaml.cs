@@ -8,6 +8,7 @@ using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
+using Pathleap.Shared.Update;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Theme;
 using System.Diagnostics;
@@ -34,6 +35,7 @@ public sealed partial class SettingsWindow : Window
     private bool _lpSyncingScopeBrowser;
     private bool _lpSyncingNetwork;
     private bool _lpSyncingAutoStart;
+    private bool _lpSyncingChannel;
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
@@ -92,6 +94,7 @@ public sealed partial class SettingsWindow : Window
         RefreshElevationState();
         InitGeneralPage();
         InitAboutPage();
+        InitUpdateChannel();
 
         ThemeService.Instance.Changed += OnThemeChanged;
         UpdateNavVisuals();
@@ -387,6 +390,11 @@ public sealed partial class SettingsWindow : Window
         {
             RefreshExcludeRules();
             _ = RefreshIndexAsync();
+        }
+
+        if (page == "update")
+        {
+            RefreshUpdateChannelState();
         }
 
         if (page == "about")
@@ -947,6 +955,46 @@ public sealed partial class SettingsWindow : Window
         var lpTask = await Task.Run(ElevationService.TaskExists);
         ElevationStateText.Text =
             $"当前进程：{(lpElevated ? "管理员权限（高完整性）" : "标准权限")} · 计划任务：{(lpTask ? "已注册" : "未注册")}";
+    }
+
+    /// <summary>更新通道：稳定版读 /releases/latest，预览版读最新的 prerelease；开关直接写 config。</summary>
+    private void InitUpdateChannel()
+    {
+        _lpSyncingChannel = true;
+        PreviewChannelSwitch.IsOn = ReleaseFeed.NormalizeChannel(_lpConfig.UpdateChannel) == ReleaseFeed.ChannelPreview;
+        _lpSyncingChannel = false;
+        RefreshUpdateChannelState();
+    }
+
+    private void RefreshUpdateChannelState()
+    {
+        var lpPreview = ReleaseFeed.NormalizeChannel(_lpConfig.UpdateChannel) == ReleaseFeed.ChannelPreview;
+        if (ChannelStatusText is not null)
+        {
+            ChannelStatusText.Text = lpPreview
+                ? "当前读取预览通道：最新的预发布 Release"
+                : "当前读取稳定版清单：最新的正式 Release";
+        }
+
+        if (VersionSubText is not null)
+        {
+            VersionSubText.Text = lpPreview ? "预览通道" : "稳定通道";
+        }
+    }
+
+    private void OnPreviewChannelToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingChannel)
+        {
+            return;
+        }
+
+        _lpConfig.UpdateChannel = PreviewChannelSwitch.IsOn
+            ? ReleaseFeed.ChannelPreview
+            : ReleaseFeed.ChannelStable;
+        _lpTheme.SaveConfig();
+        RefreshUpdateChannelState();
+        AppLog.Info($"更新通道切换: {_lpConfig.UpdateChannel}");
     }
 
     /// <summary>常规页只放当前真实可用的三组：开机启动（HKCU Run）、首次引导、数据位置。</summary>

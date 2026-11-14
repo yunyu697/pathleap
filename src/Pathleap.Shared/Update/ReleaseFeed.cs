@@ -21,6 +21,23 @@ public static class ReleaseFeed
     /// <summary>分离签名文件名；清单内的 signature 字段供客户端直接验签。</summary>
     public const string SignatureFile = "latest.json.sig";
 
+    /// <summary>清单资产名；稳定版与预览版都用这个名字。</summary>
+    public const string ManifestAssetName = "latest.json";
+
+    /// <summary>预览通道的独立清单源：GitHub API 的 Release 列表，取最新的 prerelease。</summary>
+    public const string PreviewReleasesApiUrl =
+        "https://api.github.com/repos/" + Repository + "/releases?per_page=30";
+
+    public const string ChannelStable = "stable";
+
+    public const string ChannelPreview = "preview";
+
+    /// <summary>配置里的通道值只认 <c>preview</c>，其余一律按稳定版处理。</summary>
+    public static string NormalizeChannel(string? channel) =>
+        string.Equals(channel?.Trim(), ChannelPreview, StringComparison.OrdinalIgnoreCase)
+            ? ChannelPreview
+            : ChannelStable;
+
     public const string AssetInstaller = "installer";
 
     public const string AssetPortable = "portable";

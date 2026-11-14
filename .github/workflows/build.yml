@@ -47,7 +47,11 @@ jobs:
             throw "版本号不合法: $LpVersion"
           }
 
+          # alpha 版本走预览通道：清单标记 preview，Release 标记为预发布，不进 /releases/latest。
+          $LpChannel = if ($LpVersion -match '-alpha[0-9]+$') { 'preview' } else { 'stable' }
+
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$LpVersion"
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "channel=$LpChannel"
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "artifactName=Pathleap-$LpVersion-win-x64"
 
       - name: 脚本变量命名检查
@@ -126,6 +130,8 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $LpTag = "${{ github.ref_name }}"
           $LpVersion = "${{ steps.lpver.outputs.version }}"
+          $LpChannel = "${{ steps.lpver.outputs.channel }}"
+          $LpPrereleaseArgs = if ($LpChannel -eq 'preview') { @('--prerelease') } else { @() }
           $LpNotesFile = "docs/$LpVersion-发布说明.md"
           $LpZipPath = "dist/Pathleap-$LpVersion-win-x64.zip"
           $LpSetupPath = "dist/Pathleap-$LpVersion-win-x64-setup.exe"
@@ -136,16 +142,20 @@ jobs:
           if (gh release view $LpTag 2>$null) {
             gh release upload $LpTag @LpAssets --clobber
             if ($LASTEXITCODE -ne 0) { throw '上传资产到 Release 失败' }
+            if ($LpChannel -eq 'preview') {
+              gh release edit $LpTag @LpPrereleaseArgs
+              if ($LASTEXITCODE -ne 0) { throw '标记预发布失败' }
+            }
             if (Test-Path -LiteralPath $LpNotesFile) {
               gh release edit $LpTag --notes-file $LpNotesFile
             }
           }
           elseif (Test-Path -LiteralPath $LpNotesFile) {
-            gh release create $LpTag @LpAssets --title "Pathleap $LpVersion" --notes-file $LpNotesFile
+            gh release create $LpTag @LpAssets @LpPrereleaseArgs --title "Pathleap $LpVersion" --notes-file $LpNotesFile
             if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
           }
           else {
-            gh release create $LpTag @LpAssets --title "Pathleap $LpVersion" --generate-notes
+            gh release create $LpTag @LpAssets @LpPrereleaseArgs --title "Pathleap $LpVersion" --generate-notes
             if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
           }
 
@@ -160,7 +170,7 @@ jobs:
           Set-Content -LiteralPath $LpKeyFile -Value $env:LP_SIGNING_KEY.Trim() -NoNewline -Encoding ascii
 
           dotnet run --project src/Pathleap.ReleaseTool -- create `
-            --version $LpVersion --tag $LpTag `
+            --version $LpVersion --tag $LpTag --channel $LpChannel `
             --notes-file $LpNotesFile `
             --installer $LpSetupPath --portable $LpZipPath `
             --out dist/latest.json --sig-out dist/latest.json.sig `
@@ -174,7 +184,7 @@ jobs:
           gh release upload $LpTag dist/latest.json dist/latest.json.sig --clobber
           if ($LASTEXITCODE -ne 0) { throw '上传 latest.json / latest.json.sig 失败' }
 
-          gh release view $LpTag --json name,tagName,assets
+          gh release view $LpTag --json name,tagName,isPrerelease,assets
 
       - name: 说明（非 tag 只做校验）
         if: "!startsWith(github.ref, 'refs/tags/v')"

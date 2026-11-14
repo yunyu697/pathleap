@@ -4,6 +4,7 @@ using Pathleap.Shared;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
+using Pathleap.Shared.Update;
 using Pathleap.UI.Perf;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Theme;
@@ -872,7 +873,8 @@ public partial class App : Application
 
             // 让托盘与服务先稳定，不必和启动流程抢时间。
             await Task.Delay(TimeSpan.FromSeconds(6), _lpCts.Token);
-            var lpResult = await UpdateService.CheckAsync(_lpCts.Token);
+            var lpResult = await UpdateService.CheckAsync(
+                ReleaseFeed.NormalizeChannel(_lpConfig.UpdateChannel), _lpCts.Token);
             _lpConfig.LastUpdateCheck = DateTimeOffset.Now.ToString("O");
             ThemeService.Instance.SaveConfig();
 

@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Pathleap.Shared;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Update;
@@ -20,8 +21,20 @@ public static class UpdateService
 
     public static string HomepageUrl => ReleaseFeed.HomeUrl;
 
-    public static async Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default)
+    public static Task<UpdateCheckResult> CheckAsync(CancellationToken cancellationToken = default) =>
+        CheckAsync(ReleaseFeed.ChannelStable, cancellationToken);
+
+    /// <summary>
+    /// 按通道检查更新：稳定版读 <c>releases/latest/download/latest.json</c>；
+    /// 预览版读 GitHub API 里最新的预发布 Release，取其中的 <c>latest.json</c>。
+    /// 两者都走同一套验签与 SHA256 校验，不做降级。
+    /// </summary>
+    public static async Task<UpdateCheckResult> CheckAsync(
+        string channel,
+        CancellationToken cancellationToken = default)
     {
+        var lpChannel = ReleaseFeed.NormalizeChannel(channel);
+
         try
         {
             if (!ReleaseSigning.HasEmbeddedPublicKey)
@@ -30,18 +43,30 @@ public static class UpdateService
                     "客户端未内置发布公钥（ReleaseSigning.PublicKeyBase64 仍为占位值），已中止更新检查；不降级为无签名安装。");
             }
 
-            var lpFetched = await FetchTextWithFallbackAsync(
-                ReleaseFeed.ExpandSources(ReleaseFeed.ManifestUrl), "application/json, text/plain", cancellationToken)
-                .ConfigureAwait(false);
+            var lpFetched = lpChannel == ReleaseFeed.ChannelPreview
+                ? await FetchPreviewManifestAsync(cancellationToken).ConfigureAwait(false)
+                : await FetchTextWithFallbackAsync(
+                        ReleaseFeed.ExpandSources(ReleaseFeed.ManifestUrl),
+                        "application/json, text/plain",
+                        cancellationToken)
+                    .ConfigureAwait(false);
             if (!lpFetched.Ok)
             {
-                AppLog.Warn($"更新检查失败: {lpFetched.Error}");
+                AppLog.Warn($"更新检查失败（{lpChannel}）: {lpFetched.Error}");
                 return UpdateCheckResult.Failure(lpFetched.Error);
             }
 
-            AppLog.Info($"更新清单来源: {DescribeSource(lpFetched.Source)}");
+            AppLog.Info($"更新清单来源: {DescribeSource(lpFetched.Source)}（{lpChannel}）");
             var lpManifest = LatestManifest.Parse(lpFetched.Text);
             lpManifest.Validate();
+
+            var lpManifestChannel = ReleaseFeed.NormalizeChannel(lpManifest.Channel);
+            if (lpManifestChannel != lpChannel)
+            {
+                var lpMismatch = $"清单通道为 {lpManifestChannel}，与当前选择的 {lpChannel} 不一致，已中止。";
+                AppLog.Warn(lpMismatch);
+                return UpdateCheckResult.Failure(lpMismatch);
+            }
 
             if (!ReleaseSigning.Verify(lpManifest))
             {
@@ -190,6 +215,135 @@ public static class UpdateService
         File.Move(lpPartial, destinationPath, overwrite: true);
         AppLog.Info($"已下载并校验安装包: {destinationPath} sha256={lpActualHash}");
     }
+
+    /// <summary>
+    /// 预览通道：从 GitHub API 的 Release 列表里挑发布时间最新的预发布版本，读它的 <c>latest.json</c>。
+    /// 只接受 <c>prerelease=true</c> 且未归档为 draft 的条目；没有预发布时明确告知，不回落到稳定版。
+    /// api.github.com 的 TLS 握手在部分网络下不稳定，这里最多重试三次再报错。
+    /// </summary>
+    private static async Task<(bool Ok, string Text, string Source, string Error)> FetchPreviewManifestAsync(
+        CancellationToken cancellationToken)
+    {
+        const int lpMaxAttempts = 3;
+        string lpApiJson = string.Empty;
+        string? lpLastError = null;
+
+        for (var lpAttempt = 1; lpAttempt <= lpMaxAttempts; lpAttempt++)
+        {
+            try
+            {
+                using var lpRequest = new HttpRequestMessage(HttpMethod.Get, ReleaseFeed.PreviewReleasesApiUrl);
+                lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
+                lpRequest.Headers.Accept.ParseAdd("application/vnd.github+json");
+
+                using var lpResponse = await Http.SendAsync(lpRequest, cancellationToken).ConfigureAwait(false);
+                if (!lpResponse.IsSuccessStatusCode)
+                {
+                    var lpStatus = (int)lpResponse.StatusCode;
+                    var lpMessage = lpStatus == 404
+                        ? "预览通道暂不可用（GitHub API 404）"
+                        : $"预览通道查询失败（HTTP {lpStatus}）";
+                    return (false, string.Empty, string.Empty, lpMessage);
+                }
+
+                lpApiJson = await lpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                lpLastError = null;
+                break;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                lpLastError = "预览通道查询超时";
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                lpLastError = ex.Message;
+            }
+
+            AppLog.Warn($"预览通道查询第 {lpAttempt} 次失败: {lpLastError}");
+            if (lpAttempt < lpMaxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(600 * lpAttempt), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (lpLastError is not null)
+        {
+            return (false, string.Empty, string.Empty, $"预览通道查询失败：{lpLastError}");
+        }
+
+        string? lpManifestUrl = null;
+        string? lpTag = null;
+
+        try
+        {
+            using var lpDocument = JsonDocument.Parse(lpApiJson);
+            if (lpDocument.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return (false, string.Empty, string.Empty, "预览通道返回了非预期的数据格式。");
+            }
+
+            var lpNewest = DateTimeOffset.MinValue;
+            foreach (var lpRelease in lpDocument.RootElement.EnumerateArray())
+            {
+                if (GetBool(lpRelease, "draft") || !GetBool(lpRelease, "prerelease"))
+                {
+                    continue;
+                }
+
+                if (!lpRelease.TryGetProperty("assets", out var lpAssets) || lpAssets.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                string? lpUrl = null;
+                foreach (var lpAsset in lpAssets.EnumerateArray())
+                {
+                    if (string.Equals(GetString(lpAsset, "name"), ReleaseFeed.ManifestAssetName, StringComparison.Ordinal))
+                    {
+                        lpUrl = GetString(lpAsset, "browser_download_url");
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(lpUrl))
+                {
+                    continue;
+                }
+
+                var lpPublished = DateTimeOffset.TryParse(GetString(lpRelease, "published_at"), out var lpParsed)
+                    ? lpParsed
+                    : DateTimeOffset.MinValue;
+                if (lpPublished >= lpNewest)
+                {
+                    lpNewest = lpPublished;
+                    lpManifestUrl = lpUrl;
+                    lpTag = GetString(lpRelease, "tag_name");
+                }
+            }
+        }
+        catch (JsonException ex)
+        {
+            return (false, string.Empty, string.Empty, $"预览通道数据解析失败：{ex.Message}");
+        }
+
+        if (string.IsNullOrEmpty(lpManifestUrl))
+        {
+            return (false, string.Empty, string.Empty, "预览通道暂无预发布版本；切回稳定版可继续检查正式版。");
+        }
+
+        AppLog.Info($"预览通道: 选中 {lpTag}");
+        return await FetchTextWithFallbackAsync(
+                ReleaseFeed.ExpandSources(lpManifestUrl), "application/json, text/plain", cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static string GetString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static bool GetBool(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     private static string DescribeSource(string url)
     {
