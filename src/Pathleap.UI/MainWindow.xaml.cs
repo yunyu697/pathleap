@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Pathleap.Shared;
+using Windows.ApplicationModel.DataTransfer;
 using Pathleap.Shared.Config;
 using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
@@ -844,6 +845,81 @@ public sealed partial class MainWindow : Window
 
             OpenSelected();
         }
+    }
+
+    private void OnRowMenuOpen(object sender, RoutedEventArgs e)
+    {
+        if (SelectMenuRow(sender) is not null)
+        {
+            OpenSelected();
+        }
+    }
+
+    private void OnRowMenuReveal(object sender, RoutedEventArgs e)
+    {
+        var lpRow = SelectMenuRow(sender);
+        if (lpRow is null)
+        {
+            return;
+        }
+
+        if (!ShellReveal.TryReveal(lpRow.FullPath))
+        {
+            ShowEmpty("\uE783", "无法在资源管理器中显示", lpRow.FullPath);
+            return;
+        }
+
+        HideCore();
+    }
+
+    private void OnRowMenuCopyPath(object sender, RoutedEventArgs e)
+    {
+        var lpRow = SelectMenuRow(sender);
+        if (lpRow is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var lpPackage = new DataPackage();
+            lpPackage.SetText(lpRow.FullPath);
+            Clipboard.SetContent(lpPackage);
+            try
+            {
+                Clipboard.Flush();
+            }
+            catch (Exception lpFlushEx)
+            {
+                // 部分环境下 Flush 拿不到剪贴板所有权，但内容已在 SetContent 时写入
+                AppLog.Warn($"剪贴板 Flush 失败（内容已写入）: {lpFlushEx.Message}");
+            }
+
+            AppLog.Info($"已复制路径: {lpRow.FullPath}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"复制路径失败 {lpRow.FullPath}: {ex.Message}");
+            ShowEmpty("\uE783", "无法复制路径", ex.Message);
+        }
+    }
+
+    /// <summary>右键菜单命中的行；菜单项拿不到 DataContext 时退回当前选中行。</summary>
+    private LpResultRow? SelectMenuRow(object sender)
+    {
+        if (sender is FrameworkElement lpElement && lpElement.DataContext is LpResultRow lpRow)
+        {
+            var lpIndex = _lpRows.IndexOf(lpRow);
+            if (lpIndex >= 0)
+            {
+                _lpSelectedIndex = lpIndex;
+                RefreshSelection();
+            }
+
+            return lpRow;
+        }
+
+        return _lpSelectedIndex >= 0 && _lpSelectedIndex < _lpRows.Count ? _lpRows[_lpSelectedIndex] : null;
     }
 
     /// <summary>↵/单击：目录用资源管理器打开，文件交给系统默认程序；记录最近访问后隐藏窗口。</summary>

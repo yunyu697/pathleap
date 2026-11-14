@@ -191,6 +191,25 @@
                                             PointerEntered="OnRowPointerEntered"
                                             PointerExited="OnRowPointerExited"
                                             AutomationProperties.Name="{x:Bind Name}">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Text="打开" Click="OnRowMenuOpen">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8E5;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="在资源管理器中显示" Click="OnRowMenuReveal">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE838;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="复制路径" Click="OnRowMenuCopyPath">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8C8;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
                                         <Grid ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
