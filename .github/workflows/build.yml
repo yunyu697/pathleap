@@ -131,7 +131,7 @@ jobs:
           $LpTag = "${{ github.ref_name }}"
           $LpVersion = "${{ steps.lpver.outputs.version }}"
           $LpChannel = "${{ steps.lpver.outputs.channel }}"
-          $LpPrereleaseArgs = if ($LpChannel -eq 'preview') { @('--prerelease') } else { @() }
+          $LpIsPreview = $LpChannel -eq 'preview'
           $LpNotesFile = "docs/$LpVersion-发布说明.md"
           $LpZipPath = "dist/Pathleap-$LpVersion-win-x64.zip"
           $LpSetupPath = "dist/Pathleap-$LpVersion-win-x64-setup.exe"
@@ -142,20 +142,25 @@ jobs:
           if (gh release view $LpTag 2>$null) {
             gh release upload $LpTag @LpAssets --clobber
             if ($LASTEXITCODE -ne 0) { throw '上传资产到 Release 失败' }
-            if ($LpChannel -eq 'preview') {
-              gh release edit $LpTag @LpPrereleaseArgs
+            if ($LpIsPreview) {
+              gh release edit $LpTag --prerelease
               if ($LASTEXITCODE -ne 0) { throw '标记预发布失败' }
             }
             if (Test-Path -LiteralPath $LpNotesFile) {
               gh release edit $LpTag --notes-file $LpNotesFile
             }
           }
-          elseif (Test-Path -LiteralPath $LpNotesFile) {
-            gh release create $LpTag @LpAssets @LpPrereleaseArgs --title "Pathleap $LpVersion" --notes-file $LpNotesFile
-            if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
-          }
           else {
-            gh release create $LpTag @LpAssets @LpPrereleaseArgs --title "Pathleap $LpVersion" --generate-notes
+            # 预发布只影响 Release 标记与清单 channel；参数按需拼装，避免空数组 splat 被当成参数。
+            $LpCreateArgs = @($LpTag) + $LpAssets + @('--title', "Pathleap $LpVersion")
+            if ($LpIsPreview) { $LpCreateArgs += '--prerelease' }
+            if (Test-Path -LiteralPath $LpNotesFile) {
+              $LpCreateArgs += @('--notes-file', $LpNotesFile)
+            }
+            else {
+              $LpCreateArgs += '--generate-notes'
+            }
+            gh release create @LpCreateArgs
             if ($LASTEXITCODE -ne 0) { throw '创建 Release 失败' }
           }
 
