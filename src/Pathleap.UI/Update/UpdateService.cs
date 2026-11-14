@@ -30,23 +30,17 @@ public static class UpdateService
                     "客户端未内置发布公钥（ReleaseSigning.PublicKeyBase64 仍为占位值），已中止更新检查；不降级为无签名安装。");
             }
 
-            using var lpRequest = new HttpRequestMessage(HttpMethod.Get, ReleaseFeed.ManifestUrl);
-            lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
-            lpRequest.Headers.Accept.ParseAdd("application/json, text/plain");
-
-            using var lpResponse = await Http.SendAsync(lpRequest, cancellationToken).ConfigureAwait(false);
-            if (!lpResponse.IsSuccessStatusCode)
+            var lpFetched = await FetchTextWithFallbackAsync(
+                ReleaseFeed.ExpandSources(ReleaseFeed.ManifestUrl), "application/json, text/plain", cancellationToken)
+                .ConfigureAwait(false);
+            if (!lpFetched.Ok)
             {
-                var lpStatus = (int)lpResponse.StatusCode;
-                var lpMessage = lpStatus == 404
-                    ? $"主仓库暂无最新清单（HTTP 404）：{ReleaseFeed.ManifestUrl}"
-                    : $"发布仓库返回 HTTP {lpStatus}";
-                AppLog.Warn($"更新检查失败: {lpMessage}");
-                return UpdateCheckResult.Failure(lpMessage);
+                AppLog.Warn($"更新检查失败: {lpFetched.Error}");
+                return UpdateCheckResult.Failure(lpFetched.Error);
             }
 
-            var lpJson = await lpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var lpManifest = LatestManifest.Parse(lpJson);
+            AppLog.Info($"更新清单来源: {DescribeSource(lpFetched.Source)}");
+            var lpManifest = LatestManifest.Parse(lpFetched.Text);
             lpManifest.Validate();
 
             if (!ReleaseSigning.Verify(lpManifest))
@@ -103,10 +97,46 @@ public static class UpdateService
             throw new InvalidOperationException("清单未提供 SHA256，拒绝下载。");
         }
 
-        var lpExpectedHash = info.AssetSha256.ToLowerInvariant();
         var lpPartial = destinationPath + ".part";
+        var lpErrors = new List<string>();
 
-        using var lpRequest = new HttpRequestMessage(HttpMethod.Get, info.AssetUrl);
+        // 先镜像、后官方；任一源下载并通过大小/SHA256 校验即用，全部失败才报错。
+        foreach (var lpSource in ReleaseFeed.ExpandSources(info.AssetUrl))
+        {
+            try
+            {
+                await DownloadFromSourceAsync(lpSource, info, destinationPath, lpPartial, progress, cancellationToken)
+                    .ConfigureAwait(false);
+                AppLog.Info($"更新包下载来源: {DescribeSource(lpSource)}");
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                TryDelete(lpPartial);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lpErrors.Add($"{DescribeSource(lpSource)}: {ex.Message}");
+                AppLog.Warn($"下载源失败（{DescribeSource(lpSource)}）: {ex.Message}");
+                TryDelete(lpPartial);
+            }
+        }
+
+        throw new InvalidOperationException($"所有下载源均失败：{string.Join("；", lpErrors)}");
+    }
+
+    private static async Task DownloadFromSourceAsync(
+        string sourceUrl,
+        UpdateCheckResult info,
+        string destinationPath,
+        string lpPartial,
+        Action<long, long> progress,
+        CancellationToken cancellationToken)
+    {
+        var lpExpectedHash = info.AssetSha256.ToLowerInvariant();
+
+        using var lpRequest = new HttpRequestMessage(HttpMethod.Get, sourceUrl);
         lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
 
         using var lpResponse = await Http.SendAsync(lpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -153,13 +183,64 @@ public static class UpdateService
         var lpActualHash = Convert.ToHexString(lpHash.GetHashAndReset()).ToLowerInvariant();
         if (lpReceived != info.AssetSize || lpActualHash != lpExpectedHash)
         {
-            TryDelete(lpPartial);
             throw new InvalidOperationException(
                 $"安装包校验失败（大小 {lpReceived}/{info.AssetSize}，SHA256 {lpActualHash}，期望 {lpExpectedHash}），已删除下载文件并拒绝安装。");
         }
 
         File.Move(lpPartial, destinationPath, overwrite: true);
         AppLog.Info($"已下载并校验安装包: {destinationPath} sha256={lpActualHash}");
+    }
+
+    private static string DescribeSource(string url)
+    {
+        var lpHost = Uri.TryCreate(url, UriKind.Absolute, out var lpUri) ? lpUri.Host : url;
+        return ReleaseFeed.IsOfficialSource(url) ? $"官方（{lpHost}）" : $"镜像（{lpHost}）";
+    }
+
+    private static async Task<(bool Ok, string Text, string Source, string Error)> FetchTextWithFallbackAsync(
+        IEnumerable<string> sources,
+        string accept,
+        CancellationToken cancellationToken)
+    {
+        var lpErrors = new List<string>();
+        var lpSaw404 = false;
+
+        foreach (var lpSource in sources)
+        {
+            try
+            {
+                using var lpRequest = new HttpRequestMessage(HttpMethod.Get, lpSource);
+                lpRequest.Headers.UserAgent.ParseAdd($"Pathleap/{Branding.Version}");
+                lpRequest.Headers.Accept.ParseAdd(accept);
+
+                using var lpResponse = await Http.SendAsync(lpRequest, cancellationToken).ConfigureAwait(false);
+                if (!lpResponse.IsSuccessStatusCode)
+                {
+                    var lpStatus = (int)lpResponse.StatusCode;
+                    lpSaw404 |= lpStatus == 404;
+                    lpErrors.Add($"{DescribeSource(lpSource)} HTTP {lpStatus}");
+                    continue;
+                }
+
+                return (true,
+                    await lpResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false),
+                    lpSource,
+                    string.Empty);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                lpErrors.Add($"{DescribeSource(lpSource)} 超时");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                lpErrors.Add($"{DescribeSource(lpSource)} {ex.Message}");
+            }
+        }
+
+        var lpMessage = lpSaw404
+            ? $"主仓库暂无最新清单（HTTP 404）：{ReleaseFeed.ManifestUrl}"
+            : $"所有更新源均不可用：{string.Join("；", lpErrors)}";
+        return (false, string.Empty, string.Empty, lpMessage);
     }
 
     private static void TryDelete(string path)

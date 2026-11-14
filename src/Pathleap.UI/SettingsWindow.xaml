@@ -1048,14 +1048,11 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <TextBlock Text="下载镜像" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
-                                            <TextBlock Text="镜像（未接入）" FontSize="9" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Text="更新包只从 GitHub Release 下载，没有备用镜像" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="下载镜像" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock Text="下载优先走加速镜像，失败或校验不通过自动回退 GitHub 官方" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
                                     <TextBlock Grid.Column="1"
-                                               Text="GitHub 官方"
+                                               Text="镜像 → GitHub"
                                                FontSize="11"
                                                Foreground="{ThemeResource Text2Brush}"
                                                VerticalAlignment="Center" />

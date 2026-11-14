@@ -18,7 +18,7 @@ namespace Pathleap.UI;
 /// 「检查更新 / 仅下载 / 更新」与版本号、更新说明、下载源状态；下载中只多一条进度；
 /// 仅下载完成后换成「打开下载目录 / 安装」。
 /// 检查只读公开主仓库最新 Release 的 latest.json 并 Ed25519 验签；下载后校验 SHA256 才会允许安装。
-/// 只有资产是 github.com 直链时下载源才显示「官方直链」，否则明确说明镜像不可用。
+/// 只有资产是 github.com 直链时才走加速镜像；其它来源没有镜像，只直连下载。
 /// </summary>
 public sealed partial class UpdateWindow : Window
 {
@@ -213,15 +213,13 @@ public sealed partial class UpdateWindow : Window
         MirrorPanel.Visibility = Visibility.Visible;
         MirrorLabelText.Text = "下载源";
 
-        // 只有 github.com 直链才保留「官方直链」；其它来源直接说明镜像不可用，不留死选项。
+        // github.com 直链才挂加速镜像；其它来源没有镜像可用，只直连下载。
         var lpHost = GetAssetHost(info.AssetUrl);
         var lpIsGithub = string.Equals(lpHost, "github.com", StringComparison.OrdinalIgnoreCase);
         MirrorStatusText.Text = lpIsGithub
-            ? "GitHub 官方直链"
-            : $"资产不是 github.com 直链（{lpHost}），镜像不可用";
-        MirrorStatusText.Foreground = lpIsGithub
-            ? Theme.ThemeService.Instance.Text3Brush
-            : new SolidColorBrush(Color.FromArgb(255, 217, 80, 63));
+            ? "加速镜像优先，失败自动回退官方直链"
+            : $"资产不是 github.com 直链（{lpHost}），仅直连下载";
+        MirrorStatusText.Foreground = Theme.ThemeService.Instance.Text3Brush;
 
         HomeButton.Visibility = Visibility.Visible;
         CheckButton.Visibility = Visibility.Visible;
