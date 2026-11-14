@@ -1,5 +1,6 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.Win32;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -9,15 +10,17 @@ using Pathleap.Shared.Diagnostics;
 using Pathleap.Shared.Ipc;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Theme;
+using System.Diagnostics;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
 using Windows.UI;
 
 namespace Pathleap.UI;
 
 /// <summary>
-/// 设置窗（设计稿屏 3）：左侧分类、右侧内容，四页——外观与主题、快捷键、搜索范围与索引、更新。
+/// 设置窗（设计稿屏 3）：左侧分类、右侧内容，七页——常规、外观与主题、快捷键、搜索范围与索引、更新、关于、帮助。
 /// 主题/强调色/不透明度/磨砂/密度五项都是真实控件，改动立即作用到主窗口并写回 config.json。
-/// 未实现的搜索范围项与快捷键组合在界面上明确标注「未接入」，不放假开关。
+/// 未实现的搜索范围项在界面上明确标注「未接入」，不放假开关。
 /// </summary>
 public sealed partial class SettingsWindow : Window
 {
@@ -30,6 +33,7 @@ public sealed partial class SettingsWindow : Window
     private bool _lpSyncingScopeApps;
     private bool _lpSyncingScopeBrowser;
     private bool _lpSyncingNetwork;
+    private bool _lpSyncingAutoStart;
     private bool _lpElevationBusy;
 
     public event Action? UpdateRequested;
@@ -39,6 +43,9 @@ public sealed partial class SettingsWindow : Window
 
     private readonly List<(Button Row, HotkeySpec Spec)> _lpHotkeyRows = new();
     private static readonly SolidColorBrush FailureBrush = new(Color.FromArgb(255, 226, 132, 90));
+
+    /// <summary>当前用户的开机启动项。只写 HKCU，不需要管理员权限，也不影响同一台电脑的其它账户。</summary>
+    private const string AutoStartRegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     public SettingsWindow(AppConfig config)
     {
@@ -83,6 +90,8 @@ public sealed partial class SettingsWindow : Window
         RefreshIndexDirectories();
         ApplyInstallInfo();
         RefreshElevationState();
+        InitGeneralPage();
+        InitAboutPage();
 
         ThemeService.Instance.Changed += OnThemeChanged;
         UpdateNavVisuals();
@@ -357,20 +366,32 @@ public sealed partial class SettingsWindow : Window
     private void ShowPage(string page)
     {
         _lpCurrentPage = page;
+        PageGeneral.Visibility = page == "general" ? Visibility.Visible : Visibility.Collapsed;
         PageAppearance.Visibility = page == "appearance" ? Visibility.Visible : Visibility.Collapsed;
         PageShortcuts.Visibility = page == "shortcuts" ? Visibility.Visible : Visibility.Collapsed;
         PageScope.Visibility = page == "scope" ? Visibility.Visible : Visibility.Collapsed;
         PageUpdate.Visibility = page == "update" ? Visibility.Visible : Visibility.Collapsed;
+        PageAbout.Visibility = page == "about" ? Visibility.Visible : Visibility.Collapsed;
         PageHelp.Visibility = page == "help" ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateNavVisuals();
         // 窗口尺寸固定（840×640 DIP），切页只换内容、不改变窗口大小；内容超出时由 ContentScroller 自己滚动。
         ContentScroller.ChangeView(null, 0, null, disableAnimation: true);
 
+        if (page == "general")
+        {
+            RefreshGeneralState();
+        }
+
         if (page == "scope")
         {
             RefreshExcludeRules();
             _ = RefreshIndexAsync();
+        }
+
+        if (page == "about")
+        {
+            _ = RefreshAboutAsync();
         }
 
         AppLog.Debug($"设置页切换: {page}");
@@ -381,10 +402,12 @@ public sealed partial class SettingsWindow : Window
 
     private void UpdateNavVisuals()
     {
+        ApplyNav(NavGeneral, _lpCurrentPage == "general");
         ApplyNav(NavAppearance, _lpCurrentPage == "appearance");
         ApplyNav(NavShortcuts, _lpCurrentPage == "shortcuts");
         ApplyNav(NavScope, _lpCurrentPage == "scope");
         ApplyNav(NavUpdate, _lpCurrentPage == "update");
+        ApplyNav(NavAbout, _lpCurrentPage == "about");
         ApplyNav(NavHelp, _lpCurrentPage == "help");
     }
 
@@ -486,6 +509,8 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
+    private void OnNavGeneralClick(object sender, RoutedEventArgs e) => ShowPage("general");
+
     private void OnNavAppearanceClick(object sender, RoutedEventArgs e) => ShowPage("appearance");
 
     private void OnNavShortcutsClick(object sender, RoutedEventArgs e) => ShowPage("shortcuts");
@@ -493,6 +518,8 @@ public sealed partial class SettingsWindow : Window
     private void OnNavScopeClick(object sender, RoutedEventArgs e) => ShowPage("scope");
 
     private void OnNavUpdateClick(object sender, RoutedEventArgs e) => ShowPage("update");
+
+    private void OnNavAboutClick(object sender, RoutedEventArgs e) => ShowPage("about");
 
     private void OnNavHelpClick(object sender, RoutedEventArgs e) => ShowPage("help");
 
@@ -920,6 +947,185 @@ public sealed partial class SettingsWindow : Window
         var lpTask = await Task.Run(ElevationService.TaskExists);
         ElevationStateText.Text =
             $"当前进程：{(lpElevated ? "管理员权限（高完整性）" : "标准权限")} · 计划任务：{(lpTask ? "已注册" : "未注册")}";
+    }
+
+    /// <summary>常规页只放当前真实可用的三组：开机启动（HKCU Run）、首次引导、数据位置。</summary>
+    private void InitGeneralPage()
+    {
+        ConfigPathText.Text = AppPaths.UserRoot;
+        LogPathText.Text = AppPaths.LogsRoot;
+        RefreshGeneralState();
+    }
+
+    private void RefreshGeneralState()
+    {
+        _lpSyncingAutoStart = true;
+        AutoStartSwitch.IsOn = IsAutoStartEnabled();
+        _lpSyncingAutoStart = false;
+        AutoStartStatus.Text = AutoStartSwitch.IsOn
+            ? "已加入当前用户的开机启动（HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run）；同一台电脑的其它用户账户不受影响。"
+            : "未加入开机启动；开启后下次登录 Windows 会静默驻留托盘，不弹窗。";
+
+        OnboardingStatusText.Text = _lpConfig.OnboardingDone
+            ? "首次使用引导已完成；点「重新显示」可在下次启动时再次看到。"
+            : "首次使用引导将在下次启动时显示。";
+    }
+
+    private static string AutoStartCommand()
+    {
+        var lpExe = Environment.ProcessPath;
+        return string.IsNullOrEmpty(lpExe) ? string.Empty : $"\"{lpExe}\" --tray";
+    }
+
+    private static bool IsAutoStartEnabled()
+    {
+        try
+        {
+            using var lpKey = Registry.CurrentUser.OpenSubKey(AutoStartRegistryPath);
+            var lpValue = lpKey?.GetValue(Branding.ProductId) as string;
+            return !string.IsNullOrWhiteSpace(lpValue)
+                && string.Equals(lpValue.Trim(), AutoStartCommand(), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>真写注册表：失败时回退开关并说明原因，不留下“看起来已开启”的假状态。</summary>
+    private void OnAutoStartToggled(object? sender, EventArgs e)
+    {
+        if (_lpSyncingAutoStart)
+        {
+            return;
+        }
+
+        var lpEnable = AutoStartSwitch.IsOn;
+        try
+        {
+            using var lpKey = Registry.CurrentUser.CreateSubKey(AutoStartRegistryPath, writable: true);
+            if (lpEnable)
+            {
+                lpKey.SetValue(Branding.ProductId, AutoStartCommand(), RegistryValueKind.String);
+            }
+            else if (lpKey.GetValue(Branding.ProductId) is not null)
+            {
+                lpKey.DeleteValue(Branding.ProductId, throwOnMissingValue: false);
+            }
+
+            AutoStartStatus.Text = lpEnable
+                ? "已加入当前用户的开机启动（HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run）；同一台电脑的其它用户账户不受影响。"
+                : "已从开机启动移除；下次登录 Windows 不再自动驻留。";
+            AppLog.Info($"开机启动：{(lpEnable ? "已添加" : "已移除")}（HKCU Run）");
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+            _lpSyncingAutoStart = true;
+            AutoStartSwitch.IsOn = !lpEnable;
+            _lpSyncingAutoStart = false;
+            AutoStartStatus.Text = $"写入开机启动失败：{ex.Message}";
+            AppLog.Error($"开机启动写入失败: {ex.Message}");
+        }
+    }
+
+    private void OnResetOnboardingClick(object sender, RoutedEventArgs e)
+    {
+        _lpConfig.OnboardingDone = false;
+        _lpTheme.SaveConfig();
+        OnboardingStatusText.Text = "已重置：下次启动 Pathleap 时会再次显示首次使用引导。";
+        AppLog.Info("首次使用引导已重置（下次启动显示）");
+    }
+
+    private void OnOpenConfigDirectoryClick(object sender, RoutedEventArgs e) => OpenFolder(AppPaths.UserRoot, "配置目录");
+
+    private void OnOpenLogDirectoryClick(object sender, RoutedEventArgs e) => OpenFolder(AppPaths.LogsRoot, "日志目录");
+
+    private static void OpenFolder(string path, string label)
+    {
+        try
+        {
+            var lpFull = AppPaths.EnsureDirectory(path);
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{lpFull}\"") { UseShellExecute = true });
+            AppLog.Info($"打开{label}: {lpFull}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            AppLog.Error($"打开{label}失败: {ex.Message}");
+        }
+    }
+
+    private void InitAboutPage()
+    {
+        AboutVersionText.Text = $"版本 {Branding.Version} · {Branding.ChineseName}";
+        AboutChannelText.Text = _lpConfig.UpdateChannel == "stable"
+            ? "稳定通道（stable）"
+            : $"预览通道（{_lpConfig.UpdateChannel}）";
+        var lpElevated = ElevationService.IsElevated();
+        var lpTask = ElevationService.TaskExists();
+        AboutModeText.Text = lpElevated
+            ? $"管理员权限（高完整性） · 登录提权计划任务{(lpTask ? "已注册" : "未注册")}"
+            : $"标准权限 · 登录提权计划任务{(lpTask ? "已注册（下次启动生效）" : "未注册")}";
+        AboutConfigText.Text = AppPaths.ConfigFile;
+        AboutIndexText.Text = "切到本页时读取";
+    }
+
+    private async Task RefreshAboutAsync()
+    {
+        try
+        {
+            var lpReply = await PipeClient.SendAsync(
+                Branding.ServicePipeName,
+                new IpcRequest { Command = "INDEX_STATUS" },
+                TimeSpan.FromSeconds(3));
+            var lpStatus = lpReply.Index;
+            if (!lpReply.Ok || lpStatus is null)
+            {
+                AboutIndexText.Text = $"后台索引服务未连接（{lpReply.Message}）";
+                return;
+            }
+
+            var lpState = lpStatus.State switch
+            {
+                "ready" => "就绪",
+                "building" => lpStatus.Percent >= 0 ? $"构建中 {lpStatus.Percent:0}%" : "构建中",
+                "error" => "失败",
+                _ => "未建"
+            };
+            AboutIndexText.Text = $"{lpState} · {FormatCount(lpStatus.EntryCount)} 项 · {FormatBytes(lpStatus.FileBytes)}" +
+                                  (lpStatus.Loaded ? $" · 来源 {DescribeSource(lpStatus.Source)}" : string.Empty);
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
+        {
+            AboutIndexText.Text = $"后台索引服务未连接（{ex.Message}）";
+        }
+    }
+
+    private void OnCopyDiagnosticsClick(object sender, RoutedEventArgs e)
+    {
+        var lpText = string.Join(Environment.NewLine, new[]
+        {
+            $"{Branding.DisplayName}（{Branding.ChineseName}） {Branding.Version}",
+            $"通道: {_lpConfig.UpdateChannel}",
+            $"运行方式: {(ElevationService.IsElevated() ? "管理员权限（高完整性）" : "标准权限")}",
+            $"索引: {AboutIndexText.Text}",
+            $"配置: {AppPaths.ConfigFile}",
+            $"日志: {AppPaths.LogsRoot}",
+            $"系统: {Environment.OSVersion.VersionString} · .NET {Environment.Version}"
+        });
+        try
+        {
+            var lpPackage = new DataPackage();
+            lpPackage.SetText(lpText);
+            Clipboard.SetContent(lpPackage);
+            Clipboard.Flush();
+            AboutActionText.Text = "诊断信息已复制到剪贴板。";
+            AppLog.Info("关于页：诊断信息已复制");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            AboutActionText.Text = $"复制失败：{ex.Message}";
+            AppLog.Error($"关于页：复制诊断信息失败: {ex.Message}");
+        }
     }
 
     private readonly record struct ElevationTaskResult(bool Ok, string Error);

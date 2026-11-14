@@ -957,6 +957,14 @@ public partial class App : Application
                 OpenSettings("appearance");
                 break;
 
+            case "settings-general":
+                OpenSettings("general");
+                break;
+
+            case "settings-about":
+                OpenSettings("about");
+                break;
+
             case "settings-shortcuts":
                 OpenSettings("shortcuts");
                 break;

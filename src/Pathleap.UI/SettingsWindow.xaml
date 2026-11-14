@@ -151,6 +151,15 @@
                             </Grid>
 
                             <StackPanel Grid.Row="1">
+                                <Button x:Name="NavGeneral"
+                                        Style="{StaticResource LpNavButtonStyle}"
+                                        Click="OnNavGeneralClick">
+                                    <StackPanel Orientation="Horizontal" Spacing="9">
+                                        <FontIcon Glyph="&#xE713;" FontSize="14" />
+                                        <TextBlock Text="常规" FontSize="12" />
+                                    </StackPanel>
+                                </Button>
+
                                 <Button x:Name="NavAppearance"
                                         Style="{StaticResource LpNavButtonStyle}"
                                         Click="OnNavAppearanceClick">
@@ -194,6 +203,15 @@
                                     </StackPanel>
                                 </Button>
 
+                                <Button x:Name="NavAbout"
+                                        Style="{StaticResource LpNavButtonStyle}"
+                                        Click="OnNavAboutClick">
+                                    <StackPanel Orientation="Horizontal" Spacing="9">
+                                        <FontIcon Glyph="&#xE946;" FontSize="14" />
+                                        <TextBlock Text="关于" FontSize="12" />
+                                    </StackPanel>
+                                </Button>
+
                                 <Button x:Name="NavHelp"
                                         Style="{StaticResource LpNavButtonStyle}"
                                         Click="OnNavHelpClick">
@@ -227,6 +245,99 @@
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                         <Grid Padding="26,18,26,26">
+                            <!-- 常规 -->
+                            <StackPanel x:Name="PageGeneral" Visibility="Collapsed">
+                                <TextBlock Text="常规"
+                                           FontSize="20"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource Text1Brush}" />
+                                <TextBlock Text="启动方式、首次引导与数据位置。"
+                                           FontSize="11"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           Margin="0,5,0,0" />
+
+                                <TextBlock Text="启动"
+                                           Style="{StaticResource LpSectionLabelStyle}"
+                                           Margin="0,22,0,4" />
+                                <Grid Margin="0,8,0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="28" Height="28" CornerRadius="7" Background="{ThemeResource Surface3Brush}" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE7E8;" FontSize="13" Foreground="#5A9CF8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="开机启动" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock Text="登录 Windows 后静默驻留托盘，不弹窗；写入当前用户的 HKCU 启动项" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <controls:LpSwitch x:Name="AutoStartSwitch" Grid.Column="2" IsOn="False" VerticalAlignment="Center"
+                                                       AutomationProperties.Name="开机启动开关" Toggled="OnAutoStartToggled" />
+                                </Grid>
+                                <TextBlock x:Name="AutoStartStatus"
+                                           FontSize="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap" />
+
+                                <TextBlock Text="引导"
+                                           Style="{StaticResource LpSectionLabelStyle}"
+                                           Margin="0,20,0,4" />
+                                <Grid Margin="0,8,0,4" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="首次使用引导" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock Text="主窗与快速切换栏的操作提示；重新开启后下次启动再次显示" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button x:Name="OnboardingResetButton"
+                                            Grid.Column="1"
+                                            Content="重新显示"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            Click="OnResetOnboardingClick" />
+                                </Grid>
+                                <TextBlock x:Name="OnboardingStatusText"
+                                           FontSize="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap" />
+
+                                <TextBlock Text="数据位置"
+                                           Style="{StaticResource LpSectionLabelStyle}"
+                                           Margin="0,20,0,4" />
+                                <Grid Margin="0,8,0,4" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="配置目录" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock x:Name="ConfigPathText" Text="…" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="打开"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            AutomationProperties.Name="打开配置目录"
+                                            Click="OnOpenConfigDirectoryClick" />
+                                </Grid>
+                                <Grid Margin="0,8,0,4" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                                        <TextBlock Text="日志目录" FontSize="12.5" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock x:Name="LogPathText" Text="…" FontSize="10.5" Foreground="{ThemeResource Text3Brush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Content="打开"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            AutomationProperties.Name="打开日志目录"
+                                            Click="OnOpenLogDirectoryClick" />
+                                </Grid>
+                            </StackPanel>
+
                             <!-- 外观与主题 -->
                             <StackPanel x:Name="PageAppearance">
                                 <TextBlock Text="外观与主题"
@@ -1024,6 +1135,86 @@
                                         </Border>
                                     </StackPanel>
                                 </Border>
+                            </StackPanel>
+
+                            <!-- 关于 -->
+                            <StackPanel x:Name="PageAbout" Visibility="Collapsed">
+                                <TextBlock Text="关于"
+                                           FontSize="20"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource Text1Brush}" />
+                                <TextBlock Text="版本、运行方式与本地数据位置。"
+                                           FontSize="11"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           Margin="0,5,0,0" />
+
+                                <Grid Margin="0,20,0,4" ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="42" Height="42" CornerRadius="10" Background="{ThemeResource Surface3Brush}" VerticalAlignment="Top">
+                                        <FontIcon Glyph="&#xE8A7;" FontSize="20" Foreground="#5A9CF8" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="Pathleap · 跃径" FontSize="15" FontWeight="SemiBold" Foreground="{ThemeResource Text1Brush}" />
+                                        <TextBlock x:Name="AboutVersionText" Text="版本 …" FontSize="11" Foreground="{ThemeResource Text3Brush}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <TextBlock Text="运行信息"
+                                           Style="{StaticResource LpSectionLabelStyle}"
+                                           Margin="0,20,0,4" />
+                                <Grid Margin="0,6,0,0" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="通道" FontSize="12" Foreground="{ThemeResource Text3Brush}" />
+                                    <TextBlock x:Name="AboutChannelText" Grid.Column="1" Text="…" FontSize="12" Foreground="{ThemeResource Text1Brush}" />
+                                </Grid>
+                                <Grid Margin="0,6,0,0" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="运行方式" FontSize="12" Foreground="{ThemeResource Text3Brush}" />
+                                    <TextBlock x:Name="AboutModeText" Grid.Column="1" Text="…" FontSize="12" Foreground="{ThemeResource Text1Brush}" TextWrapping="Wrap" />
+                                </Grid>
+                                <Grid Margin="0,6,0,0" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="索引" FontSize="12" Foreground="{ThemeResource Text3Brush}" />
+                                    <TextBlock x:Name="AboutIndexText" Grid.Column="1" Text="正在读取…" FontSize="12" Foreground="{ThemeResource Text1Brush}" TextWrapping="Wrap" />
+                                </Grid>
+                                <Grid Margin="0,6,0,0" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="配置" FontSize="12" Foreground="{ThemeResource Text3Brush}" />
+                                    <TextBlock x:Name="AboutConfigText" Grid.Column="1" Text="…" FontSize="11" Foreground="{ThemeResource Text2Brush}" TextWrapping="Wrap" />
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,18,0,0">
+                                    <Button Content="检查更新"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            Click="OnCheckUpdateClick" />
+                                    <Button Content="复制诊断信息"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            AutomationProperties.Name="复制诊断信息"
+                                            Click="OnCopyDiagnosticsClick" />
+                                    <Button Content="打开配置目录"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            Click="OnOpenConfigDirectoryClick" />
+                                </StackPanel>
+                                <TextBlock x:Name="AboutActionText"
+                                           FontSize="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           Margin="0,8,0,0"
+                                           TextWrapping="Wrap" />
                             </StackPanel>
 
                             <StackPanel x:Name="PageHelp" Visibility="Collapsed">
