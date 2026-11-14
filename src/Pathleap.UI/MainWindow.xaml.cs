@@ -18,6 +18,7 @@ using Pathleap.UI.Perf;
 using Pathleap.UI.Platform;
 using Pathleap.UI.Theme;
 using Windows.Graphics;
+using Windows.Storage;
 using Windows.System;
 using Windows.UI;
 
@@ -968,6 +969,70 @@ public sealed partial class MainWindow : Window
         return _lpSelectedIndex >= 0 && _lpSelectedIndex < _lpRows.Count ? _lpRows[_lpSelectedIndex] : null;
     }
 
+    /// <summary>拖入文件 / 文件夹到窗口：文件夹用资源管理器打开，文件交给默认程序，然后收起窗口。</summary>
+    private void OnWindowDragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = "打开";
+            e.DragUIOverride.IsCaptionVisible = true;
+            e.DragUIOverride.IsGlyphVisible = false;
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.None;
+    }
+
+    private async void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        IReadOnlyList<IStorageItem> lpItems;
+        try
+        {
+            lpItems = await e.DataView.GetStorageItemsAsync();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn($"读取拖放条目失败: {ex.Message}");
+            return;
+        }
+
+        if (lpItems.Count == 0)
+        {
+            return;
+        }
+
+        // 虚拟条目（压缩包内、网络快捷方式等）没有本地路径，直接忽略。
+        var lpItem = lpItems[0];
+        var lpPath = lpItem.Path;
+        if (string.IsNullOrWhiteSpace(lpPath))
+        {
+            AppLog.Warn("拖放的条目没有本地路径，已忽略");
+            return;
+        }
+
+        var lpIsDirectory = lpItem is StorageFolder || Directory.Exists(lpPath);
+        try
+        {
+            var lpStartInfo = lpIsDirectory
+                ? new ProcessStartInfo("explorer.exe", $"\"{lpPath}\"") { UseShellExecute = true }
+                : new ProcessStartInfo(lpPath) { UseShellExecute = true };
+            Process.Start(lpStartInfo);
+            AppLog.Info($"拖放打开{(lpIsDirectory ? "目录" : "文件")}: {lpPath}");
+            e.Handled = true;
+            HideCore();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"拖放打开失败: {lpPath}", ex);
+        }
+    }
+
     /// <summary>↵/单击：目录用资源管理器打开，文件交给系统默认程序；记录最近访问后隐藏窗口。</summary>
     private void OpenSelected()
     {
@@ -1039,6 +1104,34 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private int _lpDeactivateHideVersion;
+
+    /// <summary>
+    /// 失焦隐藏前先等一下：从资源管理器拖文件过来时，按下鼠标就会让本窗口失焦，
+    /// 若立刻隐藏就没法接住拖放。300ms 后左键仍按着，视为正在拖拽、先不隐藏。
+    /// </summary>
+    private async Task HideAfterDeactivateAsync(int lpVersion)
+    {
+        await Task.Delay(300);
+        if (lpVersion != _lpDeactivateHideVersion || !_lpVisible)
+        {
+            return;
+        }
+
+        if ((GetAsyncKeyState(VirtualKeyLeftButton) & 0x8000) != 0)
+        {
+            AppLog.Debug("失焦时左键仍按下（可能在拖拽），暂不隐藏");
+            return;
+        }
+
+        HideCore();
+    }
+
+    private const int VirtualKeyLeftButton = 0x01;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int lpVirtualKey);
+
     private void OnActivated(object sender, WindowActivatedEventArgs e)
     {
         if (e.WindowActivationState == WindowActivationState.Deactivated
@@ -1052,7 +1145,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            HideCore();
+            var lpVersion = ++_lpDeactivateHideVersion;
+            _ = HideAfterDeactivateAsync(lpVersion);
         }
     }
 

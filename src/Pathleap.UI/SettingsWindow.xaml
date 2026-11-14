@@ -1017,7 +1017,7 @@
                                                    TextWrapping="Wrap" />
 
                                         <Border Background="{ThemeResource Surface3Brush}" CornerRadius="7" Padding="10,8">
-                                            <TextBlock Text="提权后受 Windows UIPI 限制：普通权限的资源管理器不能向本窗口拖放文件（当前版本尚未接入拖放，接入后该限制依然存在）；全局热键、托盘与单实例转发不受影响。"
+                                            <TextBlock Text="提权后受 Windows UIPI 限制：普通权限的资源管理器不能向本窗口拖放文件；全局热键、托盘与单实例转发不受影响。"
                                                        FontSize="10"
                                                        Foreground="{ThemeResource Text3Brush}"
                                                        TextWrapping="Wrap" />
