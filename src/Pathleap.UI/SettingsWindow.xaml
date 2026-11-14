@@ -639,7 +639,7 @@
                                            FontSize="20"
                                            FontWeight="SemiBold"
                                            Foreground="{ThemeResource Text1Brush}" />
-                                <TextBlock Text="当前索引单个卷的根目录；搜索范围与排除规则尚未提供配置。"
+                                <TextBlock Text="当前索引单个卷的根目录；浏览器数据与网络位置尚未提供配置。"
                                            FontSize="11"
                                            Foreground="{ThemeResource Text3Brush}"
                                            Margin="0,5,0,0" />
@@ -721,11 +721,37 @@
                                            Style="{StaticResource LpSectionLabelStyle}"
                                            Margin="0,20,0,9" />
                                 <StackPanel x:Name="IndexChipsPanel" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" />
-                                
+
                                 <TextBlock Text="排除规则"
                                            Style="{StaticResource LpSectionLabelStyle}"
                                            Margin="0,20,0,9" />
-                                <StackPanel x:Name="ExcludeChipsPanel" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left" />
+                                <TextBlock Text="被排除目录及其子项不会出现在搜索结果中；保存后立即生效，不需要重建索引。"
+                                           FontSize="10.5"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="ExcludePathBox"
+                                             PlaceholderText="文件夹完整路径，例如 D:\Temp"
+                                             FontSize="11.5"
+                                             Height="32"
+                                             VerticalAlignment="Center" />
+                                    <Button x:Name="ExcludeAddButton"
+                                            Grid.Column="1"
+                                            Content="添加"
+                                            Style="{StaticResource LpGhostButtonStyle}"
+                                            Click="OnAddExcludeClick" />
+                                </Grid>
+                                <TextBlock x:Name="ExcludeStatusText"
+                                           FontSize="10"
+                                           Foreground="{ThemeResource Text3Brush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,6,0,0" />
+                                <StackPanel x:Name="ExcludeRulePanel" Spacing="6" Margin="0,8,0,0" />
 
                                 <Border Style="{StaticResource LpCardStyle}" Margin="0,20,0,0" Padding="14,12">
                                     <StackPanel Spacing="10">

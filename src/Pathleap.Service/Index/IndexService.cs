@@ -17,6 +17,7 @@ namespace Pathleap.Service.Index;
 internal sealed class IndexService : IDisposable
 {
     private readonly object _lpGate = new();
+    private readonly ExclusionRules _lpExclusions = new();
     private IndexSnapshot? _lpSnapshot;
     private SearchEngine? _lpEngine;
     private IndexStatusDto _lpStatus = new() { State = "not-built", Note = "尚未构建索引" };
@@ -367,10 +368,16 @@ internal sealed class IndexService : IDisposable
 
     public SearchOutcome? Search(string query, int limit, bool? directoriesOnly = null)
     {
+        // 排除规则按查询取一次快照（配置文件改了才重读），过滤在引擎取结果阶段完成。
+        var lpPrefixes = _lpExclusions.GetPrefixes();
+        Func<string, bool>? lpPathAllowed = lpPrefixes.Length == 0
+            ? null
+            : lpPath => !ExclusionRules.IsExcluded(lpPath, lpPrefixes);
+
         // 查询与快照释放互斥：查询只花几毫秒，串行化换来“重建时不会读到已释放的映射”。
         lock (_lpGate)
         {
-            return _lpEngine?.Search(query, limit, directoriesOnly);
+            return _lpEngine?.Search(query, limit, directoriesOnly, lpPathAllowed);
         }
     }
 

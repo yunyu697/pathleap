@@ -80,6 +80,12 @@ public sealed class AppConfig
     /// <summary>基准测试用于确认“输入已就绪”的探测键（单字符数字键，避开输入法组合态）。</summary>
     public string BenchProbeKey { get; set; } = "7";
 
+    /// <summary>
+    /// 排除路径（文件夹完整路径）。命中这些目录本身或其子项的搜索结果会被服务端过滤；
+    /// 由设置页「范围」页增删，改动后立即生效，不需要重建索引。
+    /// </summary>
+    public List<string> ExcludedPaths { get; set; } = new();
+
     public void Normalize()
     {
         if (SchemaVersion < 2)
@@ -139,6 +145,13 @@ public sealed class AppConfig
         {
             LogLevel = "Info";
         }
+
+        // 排除路径：去空白、去重（不区分大小写），保留用户输入形态（根目录保留末尾分隔符）。
+        ExcludedPaths = (ExcludedPaths ?? new List<string>())
+            .Where(static lpPath => !string.IsNullOrWhiteSpace(lpPath))
+            .Select(static lpPath => lpPath.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         if (!string.Equals(Product, Branding.ProductId, StringComparison.Ordinal))
         {

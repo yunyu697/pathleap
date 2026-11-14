@@ -354,6 +354,7 @@ public sealed partial class SettingsWindow : Window
 
         if (page == "scope")
         {
+            RefreshExcludeRules();
             _ = RefreshIndexAsync();
         }
 
@@ -744,7 +745,6 @@ public sealed partial class SettingsWindow : Window
                 : 0;
 
             BuildIndexChips(lpStatus);
-            BuildExcludeChips();
 
             // 自动构建没有经过「重建索引」按钮，这里按状态自行续上轮询，构建结束再停。
             if (lpStatus.State == "building")
@@ -808,10 +808,141 @@ public sealed partial class SettingsWindow : Window
         return source;
     }
 
-    private void BuildExcludeChips()
+    /// <summary>按当前配置重建排除规则列表；只在进入该页或增删后调用，不放进每秒的状态轮询。</summary>
+    private void RefreshExcludeRules()
     {
-        ExcludeChipsPanel.Children.Clear();
-        ExcludeChipsPanel.Children.Add(BuildChip("\uE711", "排除规则（未接入）", true));
+        ExcludeRulePanel.Children.Clear();
+        if (_lpConfig.ExcludedPaths.Count == 0)
+        {
+            ExcludeRulePanel.Children.Add(new TextBlock
+            {
+                Text = "尚未添加排除规则",
+                FontSize = 10.5,
+                Foreground = _lpTheme.Text3Brush
+            });
+            return;
+        }
+
+        foreach (var lpRule in _lpConfig.ExcludedPaths)
+        {
+            ExcludeRulePanel.Children.Add(BuildExcludeRuleRow(lpRule));
+        }
+    }
+
+    private Border BuildExcludeRuleRow(string rule)
+    {
+        var lpText = new TextBlock
+        {
+            Text = rule,
+            FontSize = 11,
+            Foreground = _lpTheme.Text1Brush,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTipService.SetToolTip(lpText, rule);
+
+        var lpRemove = new Button
+        {
+            Content = new FontIcon { Glyph = "\uE711", FontSize = 10 },
+            Background = _lpTheme.TransparentBrush,
+            BorderBrush = _lpTheme.TransparentBrush,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(6, 0, 6, 0),
+            Height = 24,
+            MinWidth = 28,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = rule
+        };
+        AutomationProperties.SetName(lpRemove, $"移除排除规则 {rule}");
+        ToolTipService.SetToolTip(lpRemove, "移除");
+        lpRemove.Click += OnRemoveExcludeClick;
+
+        var lpRow = new Grid();
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        lpRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        lpRow.Children.Add(lpText);
+        Grid.SetColumn(lpRemove, 1);
+        lpRow.Children.Add(lpRemove);
+
+        return new Border
+        {
+            Background = _lpTheme.Surface2Brush,
+            BorderBrush = _lpTheme.Border1Brush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(10, 4, 4, 4),
+            Child = lpRow
+        };
+    }
+
+    private void OnAddExcludeClick(object sender, RoutedEventArgs e)
+    {
+        var lpInput = ExcludePathBox.Text.Trim();
+        if (lpInput.Length == 0)
+        {
+            ExcludeStatusText.Text = "请输入要排除的文件夹完整路径";
+            return;
+        }
+
+        string lpFullPath;
+        try
+        {
+            lpFullPath = Path.GetFullPath(lpInput);
+        }
+        catch (Exception ex)
+        {
+            ExcludeStatusText.Text = "路径无效：" + ex.Message;
+            return;
+        }
+
+        if (!Directory.Exists(lpFullPath))
+        {
+            ExcludeStatusText.Text = $"目录不存在：{lpFullPath}";
+            return;
+        }
+
+        lpFullPath = NormalizeExcludePath(lpFullPath);
+        if (_lpConfig.ExcludedPaths.Any(lpExisting =>
+                string.Equals(NormalizeExcludePath(lpExisting), lpFullPath, StringComparison.OrdinalIgnoreCase)))
+        {
+            ExcludeStatusText.Text = "该目录已在排除列表中";
+            return;
+        }
+
+        _lpConfig.ExcludedPaths.Add(lpFullPath);
+        _lpTheme.SaveConfig();
+        ExcludePathBox.Text = string.Empty;
+        ExcludeStatusText.Text = $"已添加排除：{lpFullPath}（下一次搜索即生效）";
+        RefreshExcludeRules();
+        AppLog.Info($"排除规则已添加: {lpFullPath}");
+    }
+
+    private void OnRemoveExcludeClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string lpRule })
+        {
+            return;
+        }
+
+        var lpIndex = _lpConfig.ExcludedPaths.FindIndex(lpExisting =>
+            string.Equals(NormalizeExcludePath(lpExisting), NormalizeExcludePath(lpRule), StringComparison.OrdinalIgnoreCase));
+        if (lpIndex < 0)
+        {
+            return;
+        }
+
+        _lpConfig.ExcludedPaths.RemoveAt(lpIndex);
+        _lpTheme.SaveConfig();
+        ExcludeStatusText.Text = $"已移除排除：{lpRule}（下一次搜索即生效）";
+        RefreshExcludeRules();
+        AppLog.Info($"排除规则已移除: {lpRule}");
+    }
+
+    /// <summary>存盘形态：去掉末尾分隔符；盘符根保留为 C:\，避免显示成 C:。</summary>
+    private static string NormalizeExcludePath(string path)
+    {
+        var lpTrimmed = path.Trim().TrimEnd('\\', '/');
+        return lpTrimmed.Length == 2 && lpTrimmed[1] == ':' ? lpTrimmed + "\\" : lpTrimmed;
     }
 
     private Border BuildChip(string glyph, string text, bool dashed)

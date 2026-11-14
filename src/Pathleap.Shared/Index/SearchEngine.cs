@@ -79,7 +79,11 @@ public sealed class SearchEngine
 
     public IndexSnapshot Snapshot => _lpSnapshot;
 
-    public SearchOutcome Search(string query, int limit, bool? directoriesOnly = null)
+    public SearchOutcome Search(
+        string query,
+        int limit,
+        bool? directoriesOnly = null,
+        Func<string, bool>? pathAllowed = null)
     {
         var lpStarted = Stopwatch.GetTimestamp();
         var lpOutcome = new SearchOutcome { Query = query };
@@ -99,7 +103,7 @@ public sealed class SearchEngine
 
         if (lpTokens.Count == 1)
         {
-            CollectSingleToken(lpTokens[0], lpCount, lpBuckets, lpOutcome, Math.Clamp(limit, 1, 500));
+            CollectSingleToken(lpTokens[0], lpCount, lpBuckets, lpOutcome, Math.Clamp(limit, 1, 500), pathAllowed is null);
         }
         else
         {
@@ -120,10 +124,18 @@ public sealed class SearchEngine
             {
                 continue;
             }
+
+            // 排除规则在这里过滤：路径只在最终候选上重建，过滤成本与返回条数同阶。
+            var lpHitPath = _lpSnapshot.BuildPath(lpIndex);
+            if (pathAllowed is not null && !pathAllowed(lpHitPath))
+            {
+                continue;
+            }
+
             var lpHit = new SearchHit
             {
                 Name = _lpSnapshot.DecodeNameAt(lpIndex),
-                Path = _lpSnapshot.BuildPath(lpIndex),
+                Path = lpHitPath,
                 IsDirectory = lpRecord.IsDirectory,
                 Size = (long)lpRecord.Size,
                 Depth = lpRecord.Depth
@@ -148,7 +160,13 @@ public sealed class SearchEngine
         return Math.Round((Stopwatch.GetTimestamp() - startedTick) * 1000.0 / Stopwatch.Frequency, 3);
     }
 
-    private void CollectSingleToken(byte[] token, int count, HitBuckets buckets, SearchOutcome outcome, int limit)
+    private void CollectSingleToken(
+        byte[] token,
+        int count,
+        HitBuckets buckets,
+        SearchOutcome outcome,
+        int limit,
+        bool canStopEarly)
     {
         var lpLow = LowerBound(token);
         var lpHigh = UpperBoundOfPrefix(token, lpLow);
@@ -172,7 +190,8 @@ public sealed class SearchEngine
         // 结果按 tier 先后输出：精确/前缀命中已经够填满本次结果集时，
         // 子串命中（tier 更低）不可能进入前 limit 条，整段子串扫描可以省掉。
         // 这一条让高频前缀查询（如 report）从「全库子串扫描」降到「二分 + 前 N 条前缀」。
-        if (buckets.Count >= limit)
+        // 有排除规则时前缀命中可能在取结果阶段被过滤掉，此时不能提前跳过子串扫描。
+        if (canStopEarly && buckets.Count >= limit)
         {
             outcome.SubstringMatches = 0;
             return;
