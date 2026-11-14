@@ -196,7 +196,9 @@ public sealed partial class UpdateWindow : Window
         ShowPanel("found");
         FoundVersionText.Text = info.RemoteVersion;
         FoundOldText.Text = Branding.Version;
-        FoundChannelText.Text = _lpConfig.UpdateChannel == "stable" ? "稳定通道" : _lpConfig.UpdateChannel;
+        FoundChannelText.Text = ReleaseFeed.NormalizeChannel(_lpConfig.UpdateChannel) == ReleaseFeed.ChannelPreview
+            ? "预览通道"
+            : "稳定通道";
 
         var lpAssetLine = string.IsNullOrEmpty(info.AssetName)
             ? "该版本未附带安装包。"
