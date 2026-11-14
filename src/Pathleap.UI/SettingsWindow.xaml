@@ -585,7 +585,6 @@
                                         <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="Ctrl" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
                                         <TextBlock Text="+" FontSize="10" Foreground="{ThemeResource Text4Brush}" VerticalAlignment="Center" />
                                         <Border Style="{StaticResource LpKbdStyle}"><TextBlock Text="↵" FontSize="9.5" Foreground="{ThemeResource Text2Brush}" /></Border>
-                                        <TextBlock Text="未接入" FontSize="9.5" Foreground="{ThemeResource WarnBrush}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Grid>
                                 <Grid Margin="0,7,0,4">

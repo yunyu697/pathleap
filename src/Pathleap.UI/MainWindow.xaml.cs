@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -545,9 +546,37 @@ public sealed partial class MainWindow : Window
 
             case VirtualKey.Enter:
                 e.Handled = true;
-                OpenSelected();
+                if (InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
+                {
+                    RevealSelected();
+                }
+                else
+                {
+                    OpenSelected();
+                }
+
                 return;
         }
+    }
+
+    /// <summary>Ctrl+↵：在资源管理器中选中该条目，不加入最近访问。</summary>
+    private void RevealSelected()
+    {
+        var lpIndex = _lpSelectedIndex;
+        if (lpIndex < 0 || lpIndex >= _lpRows.Count)
+        {
+            AppLog.Info("没有可在资源管理器中显示的条目。");
+            return;
+        }
+
+        var lpRow = _lpRows[lpIndex];
+        if (!ShellReveal.TryReveal(lpRow.FullPath))
+        {
+            ShowEmpty("\uE783", "无法在资源管理器中显示", lpRow.FullPath);
+            return;
+        }
+
+        HideCore();
     }
 
     private void OnSearchTextChanged(object sender, TextChangedEventArgs e)
