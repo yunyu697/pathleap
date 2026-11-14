@@ -625,7 +625,7 @@
                                         </Grid.ColumnDefinitions>
                                         <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource Text3Brush}" VerticalAlignment="Top" />
                                         <TextBlock Grid.Column="1"
-                                                   Text="上方预置唤醒方式选中即生效，并写入 config.json 的 uiHotkey；双击类依赖低层键盘钩子，被安全软件拦截时会在状态行与托盘提示。鼠标中键/侧键需要额外的鼠标钩子，本版未接入。快速切换浮层为 Ctrl+G（quickSwitchHotkey），文件对话框打开时唤出并把文件夹路径注入对话框。"
+                                                   Text="上方预置唤醒方式选中即生效，并写入 config.json 的 uiHotkey；双击类依赖低层键盘钩子，鼠标中键/侧键依赖低层鼠标钩子，被安全软件拦截时会在状态行与托盘提示。鼠标按键不拦截，中键新开标签、侧键前进后退照常生效。快速切换浮层为 Ctrl+G（quickSwitchHotkey），文件对话框打开时唤出并把文件夹路径注入对话框。"
                                                    FontSize="10.5"
                                                    Foreground="{ThemeResource Text3Brush}"
                                                    TextWrapping="Wrap" />

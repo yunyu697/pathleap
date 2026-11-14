@@ -38,7 +38,9 @@ internal sealed class NativeMessageHost : IDisposable
     private uint _lpTaskbarCreatedMessage;
     private NotifyIconHandle? _lpTray;
     private KeyboardHook? _lpKeyboardHook;
+    private MouseHook? _lpMouseHook;
     private Func<int, bool, bool, bool>? _lpKeyInterceptor;
+    private bool _lpWatchdogStarted;
 
     /// <summary>待处理的唤醒方式切换（spec + 完成源），只在消息线程消费。</summary>
     private (HotkeySpec Spec, TaskCompletionSource<HotkeyApplyResult> Completion)? _lpPendingHotkey;
@@ -78,6 +80,11 @@ internal sealed class NativeMessageHost : IDisposable
     public bool KeyboardHookRegistered { get; private set; }
 
     public int KeyboardHookErrorCode { get; private set; }
+
+    /// <summary>鼠标钩子是否安装成功；失败时鼠标中键/侧键唤醒不可用。</summary>
+    public bool MouseHookRegistered { get; private set; }
+
+    public int MouseHookErrorCode { get; private set; }
 
     /// <summary>
     /// 全局按键拦截器（在原生消息线程回调，必须极短）：参数为虚拟键、是否按下、是否注入；
@@ -224,8 +231,25 @@ internal sealed class NativeMessageHost : IDisposable
             }
             else
             {
-                NativeMethods.SetTimer(_lpHwnd, (IntPtr)HookWatchdogTimerId, 15_000, IntPtr.Zero);
+                EnsureWatchdog();
                 AppLog.Info("低层键盘钩子已安装（每 15 秒自检重装）。");
+            }
+
+            // 鼠标钩子只在唤醒方式是鼠标时安装，避免平时为所有鼠标事件付代价。
+            _lpMouseHook = new MouseHook(OnMouseButtonPressed);
+            if (Hotkey.IsMouse)
+            {
+                MouseHookRegistered = _lpMouseHook.Install();
+                MouseHookErrorCode = _lpMouseHook.LastError;
+                if (MouseHookRegistered)
+                {
+                    EnsureWatchdog();
+                    AppLog.Info($"鼠标唤醒已启用: {Hotkey.Display}");
+                }
+                else
+                {
+                    AppLog.Error($"鼠标唤醒不可用: {Hotkey.Display}，低层鼠标钩子安装失败（Win32={MouseHookErrorCode}）。");
+                }
             }
 
             // 双击类唤醒完全依赖低层钩子：钩子不可用就等于热键未注册，必须如实反映到界面与日志。
@@ -241,6 +265,12 @@ internal sealed class NativeMessageHost : IDisposable
                 {
                     AppLog.Error($"双击唤醒不可用: {Hotkey.Display}，低层键盘钩子未安装（Win32={HotkeyErrorCode}）。");
                 }
+            }
+
+            if (Hotkey.IsMouse)
+            {
+                HotkeyRegistered = MouseHookRegistered;
+                HotkeyErrorCode = MouseHookRegistered ? 0 : MouseHookErrorCode;
             }
 
             _lpTray = new NotifyIconHandle(_lpHwnd, trayTooltip);
@@ -267,6 +297,8 @@ internal sealed class NativeMessageHost : IDisposable
             _lpTray?.Dispose();
             _lpKeyboardHook?.Remove();
             _lpKeyboardHook = null;
+            _lpMouseHook?.Remove();
+            _lpMouseHook = null;
             if (_lpHwnd != IntPtr.Zero)
             {
                 NativeMethods.KillTimer(_lpHwnd, (IntPtr)HookWatchdogTimerId);
@@ -331,11 +363,25 @@ internal sealed class NativeMessageHost : IDisposable
                 if ((int)(long)wParam == HookWatchdogTimerId)
                 {
                     // 系统会在回调超时时静默移除低层钩子，这里周期性重装以保证唤醒方式始终有效。
-                    if (_lpKeyboardHook?.Rearm() == false)
+                    if (_lpKeyboardHook?.Installed == true)
                     {
-                        KeyboardHookRegistered = false;
-                        KeyboardHookErrorCode = _lpKeyboardHook?.LastError ?? 0;
-                        AppLog.Error($"低层键盘钩子已被系统移除且重装失败（Win32={KeyboardHookErrorCode}）。");
+                        if (_lpKeyboardHook.Rearm())
+                        {
+                            KeyboardHookRegistered = true;
+                        }
+                        else
+                        {
+                            KeyboardHookRegistered = false;
+                            KeyboardHookErrorCode = _lpKeyboardHook.LastError;
+                            AppLog.Error($"低层键盘钩子已被系统移除且重装失败（Win32={KeyboardHookErrorCode}）。");
+                        }
+                    }
+
+                    if (_lpMouseHook?.Installed == true && !_lpMouseHook.Rearm())
+                    {
+                        MouseHookRegistered = false;
+                        MouseHookErrorCode = _lpMouseHook.LastError;
+                        AppLog.Error($"低层鼠标钩子已被系统移除且重装失败（Win32={MouseHookErrorCode}）。");
                     }
 
                     return IntPtr.Zero;
@@ -460,6 +506,31 @@ internal sealed class NativeMessageHost : IDisposable
 
     private uint _lpTapVirtualKey => Hotkey.Kind == HotkeyKind.DoubleTap ? Hotkey.TapVirtualKey : 0;
 
+    /// <summary>键盘钩子、鼠标钩子共用同一个自检定时器，只启动一次。</summary>
+    private void EnsureWatchdog()
+    {
+        if (_lpWatchdogStarted || _lpHwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.SetTimer(_lpHwnd, (IntPtr)HookWatchdogTimerId, 15_000, IntPtr.Zero);
+        _lpWatchdogStarted = true;
+    }
+
+    /// <summary>低层鼠标钩子回调（消息线程）：只在当前唤醒方式匹配该按键时触发。</summary>
+    private void OnMouseButtonPressed(int button)
+    {
+        if (!Hotkey.IsMouse || Hotkey.MouseButton != button)
+        {
+            return;
+        }
+
+        var lpTick = Stopwatch.GetTimestamp();
+        AppLog.Info($"鼠标唤醒触发: {Hotkey.Display}");
+        HotkeyPressed?.Invoke(lpTick);
+    }
+
     /// <summary>
     /// 低层键盘钩子收到的是左右区分的虚拟键（VK_LCONTROL=0xA2、VK_RCONTROL=0xA3 等），
     /// 而预置项用的是通用键（0x11/0x12/0x10）。这里统一归一到通用键，否则永远匹配不上、双击静默失效。
@@ -509,6 +580,12 @@ internal sealed class NativeMessageHost : IDisposable
                 NativeMethods.UnregisterHotKey(_lpHwnd, NativeMethods.HotkeyId);
             }
 
+            if (lpPrevious.Kind == HotkeyKind.Mouse && _lpMouseHook?.Installed == true)
+            {
+                _lpMouseHook.Remove();
+                MouseHookRegistered = false;
+            }
+
             HotkeyRegistered = false;
             HotkeyErrorCode = 0;
             ResetTapState();
@@ -535,6 +612,29 @@ internal sealed class NativeMessageHost : IDisposable
                         HotkeyErrorCode == NativeMethods.ErrorHotkeyAlreadyRegistered
                             ? $"{lpSpec.Display} 已被其它程序占用"
                             : $"注册 {lpSpec.Display} 失败（Win32={HotkeyErrorCode}）");
+            }
+            else if (lpSpec.IsMouse)
+            {
+                _lpMouseHook ??= new MouseHook(OnMouseButtonPressed);
+                if (!_lpMouseHook.Installed)
+                {
+                    _lpMouseHook.Install();
+                }
+
+                MouseHookRegistered = _lpMouseHook.Installed;
+                MouseHookErrorCode = _lpMouseHook.LastError;
+                HotkeyRegistered = MouseHookRegistered;
+                HotkeyErrorCode = HotkeyRegistered ? 0 : MouseHookErrorCode;
+                if (HotkeyRegistered)
+                {
+                    EnsureWatchdog();
+                }
+
+                lpResult = HotkeyRegistered
+                    ? HotkeyApplyResult.Success()
+                    : HotkeyApplyResult.Fail(
+                        HotkeyErrorCode,
+                        $"低层鼠标钩子不可用（Win32={HotkeyErrorCode}），鼠标唤醒无法工作，请换用组合键");
             }
             else
             {
@@ -571,6 +671,17 @@ internal sealed class NativeMessageHost : IDisposable
                         HotkeyErrorCode = Marshal.GetLastWin32Error();
                     }
                 }
+                else if (lpPrevious.IsMouse)
+                {
+                    _lpMouseHook ??= new MouseHook(OnMouseButtonPressed);
+                    if (!_lpMouseHook.Installed)
+                    {
+                        _lpMouseHook.Install();
+                    }
+
+                    MouseHookRegistered = _lpMouseHook.Installed;
+                    HotkeyRegistered = MouseHookRegistered;
+                }
                 else
                 {
                     HotkeyRegistered = _lpKeyboardHook?.Installed == true;
@@ -587,9 +698,12 @@ internal sealed class NativeMessageHost : IDisposable
 
             if (lpResult.Ok)
             {
-                AppLog.Info(lpSpec.Kind == HotkeyKind.Chord
-                    ? $"唤醒方式已切换: {lpSpec.Display}（RegisterHotKey）"
-                    : $"唤醒方式已切换: {lpSpec.Display}（双击判定，窗口 {TapWindowMs} ms）");
+                AppLog.Info(lpSpec.Kind switch
+                {
+                    HotkeyKind.Chord => $"唤醒方式已切换: {lpSpec.Display}（RegisterHotKey）",
+                    HotkeyKind.Mouse => $"唤醒方式已切换: {lpSpec.Display}（低层鼠标钩子）",
+                    _ => $"唤醒方式已切换: {lpSpec.Display}（双击判定，窗口 {TapWindowMs} ms）"
+                });
             }
 
             lpCompletion.TrySetResult(lpResult);

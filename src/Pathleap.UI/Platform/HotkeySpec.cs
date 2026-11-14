@@ -9,14 +9,18 @@ internal enum HotkeyKind
     Chord,
 
     /// <summary>连续按两次同一个修饰键，由低层键盘钩子判定（不叠加其它键）。</summary>
-    DoubleTap
+    DoubleTap,
+
+    /// <summary>鼠标按键按下即触发，由低层鼠标钩子（WH_MOUSE_LL）判定。</summary>
+    Mouse
 }
 
 /// <summary>
-/// 一个可解析的唤醒方式。两种实现：
+/// 一个可解析的唤醒方式。三种实现：
 ///  - <see cref="HotkeyKind.Chord"/>：修饰键 + 单主键，交给 RegisterHotKey，系统级生效；
 ///  - <see cref="HotkeyKind.DoubleTap"/>：双击 Ctrl / Alt / Shift，由低层键盘钩子判定，
-///    判定窗口内两次「按下并松开」才算触发，期间出现其它按键立即作废，避免吞掉 Ctrl+C 这类组合键。
+///    判定窗口内两次「按下并松开」才算触发，期间出现其它按键立即作废，避免吞掉 Ctrl+C 这类组合键；
+///  - <see cref="HotkeyKind.Mouse"/>：鼠标中键或侧键按下即触发，由低层鼠标钩子判定，按键本身不拦截。
 /// </summary>
 internal sealed class HotkeySpec
 {
@@ -40,6 +44,9 @@ internal sealed class HotkeySpec
     /// <summary>DoubleTap 被双击的修饰键虚拟键（Ctrl=0x11 / Alt=0x12 / Shift=0x10）；Chord 为 0。</summary>
     public uint TapVirtualKey { get; private init; }
 
+    /// <summary>鼠标按键：0=中键，1=侧键后退（XBUTTON1），2=侧键前进（XBUTTON2）；非鼠标方式为 -1。</summary>
+    public int MouseButton { get; private init; } = -1;
+
     /// <summary>界面展示形式，例如「双击 Ctrl」「Ctrl + Alt + Space」。</summary>
     public string Display { get; }
 
@@ -47,6 +54,8 @@ internal sealed class HotkeySpec
     public string Text { get; }
 
     public bool IsDoubleTap => Kind == HotkeyKind.DoubleTap;
+
+    public bool IsMouse => Kind == HotkeyKind.Mouse;
 
     /// <summary>默认唤醒方式：双击 Ctrl。</summary>
     public static HotkeySpec Default { get; } = DoubleTap("Ctrl+Ctrl", "双击 Ctrl", 0x11);
@@ -60,8 +69,8 @@ internal sealed class HotkeySpec
         "Ctrl+G");
 
     /// <summary>
-    /// 设置页预置的唤醒方式。只列真实可用的实现；鼠标中键/侧键需要额外的鼠标钩子，本版不提供，
-    /// 在说明文案里如实标注，不做假开关。
+    /// 设置页预置的唤醒方式。只列真实可用的实现；鼠标中键/侧键走低层鼠标钩子，按键本身不拦截，
+    /// 原有功能（新开标签、前进后退）照常生效，说明文案里如实写出。
     /// </summary>
     public static IReadOnlyList<HotkeyPreset> Presets { get; } = new[]
     {
@@ -94,7 +103,22 @@ internal sealed class HotkeySpec
             new HotkeySpec(HotkeyKind.Chord, NativeMethods.ModControl | NativeMethods.ModAlt, 0x46, "Ctrl + Alt + F", "Ctrl+Alt+F"),
             "Ctrl + Alt + F",
             "RegisterHotKey 注册；适合不习惯空格键的人，注意别与编辑器/游戏快捷键撞车。",
-            "组合键")
+            "组合键"),
+        new HotkeyPreset(
+            MousePress("MouseMiddle", "鼠标中键", 0),
+            "鼠标中键",
+            "低层鼠标钩子判定，按下即唤醒；按键本身照常传给当前应用（浏览器里中键仍会新开标签），介意时换回键盘方式。",
+            "鼠标"),
+        new HotkeyPreset(
+            MousePress("MouseX1", "鼠标侧键（后退）", 1),
+            "鼠标侧键（后退）",
+            "低层鼠标钩子判定，按下即唤醒；按键本身照常触发浏览器的后退，不需要该功能时再切换。",
+            "鼠标"),
+        new HotkeyPreset(
+            MousePress("MouseX2", "鼠标侧键（前进）", 2),
+            "鼠标侧键（前进）",
+            "低层鼠标钩子判定，按下即唤醒；按键本身照常触发浏览器的前进，不需要该功能时再切换。",
+            "鼠标")
     };
 
     private static HotkeySpec DoubleTap(string text, string display, uint tapKey) => new(
@@ -103,6 +127,13 @@ internal sealed class HotkeySpec
         0,
         display,
         text) { TapVirtualKey = tapKey };
+
+    private static HotkeySpec MousePress(string text, string display, int button) => new(
+        HotkeyKind.Mouse,
+        0,
+        0,
+        display,
+        text) { MouseButton = button };
 
     public static bool TryParse(string? text, out HotkeySpec spec, out string error)
     {
@@ -120,6 +151,13 @@ internal sealed class HotkeySpec
         {
             error = $"热键为空: {text}";
             return false;
+        }
+
+        // 鼠标写法：MouseMiddle / MouseX1 / MouseX2。
+        if (lpParts.Length == 1 && TryParseMouse(lpParts[0], out var lpMouse))
+        {
+            spec = lpMouse;
+            return true;
         }
 
         // 双击写法：Ctrl+Ctrl / Alt+Alt / Shift+Shift / DoubleCtrl 等。
@@ -258,6 +296,28 @@ internal sealed class HotkeySpec
         return false;
     }
 
+    private static bool TryParseMouse(string token, out HotkeySpec spec)
+    {
+        switch (token.ToUpperInvariant())
+        {
+            case "MOUSEMIDDLE":
+            case "MIDDLE":
+                spec = MousePress("MouseMiddle", "鼠标中键", 0);
+                return true;
+            case "MOUSEX1":
+            case "MOUSEBACK":
+                spec = MousePress("MouseX1", "鼠标侧键（后退）", 1);
+                return true;
+            case "MOUSEX2":
+            case "MOUSEFORWARD":
+                spec = MousePress("MouseX2", "鼠标侧键（前进）", 2);
+                return true;
+            default:
+                spec = Default;
+                return false;
+        }
+    }
+
     private static uint ParseKey(string token, out string canonical)
     {
         canonical = token;
@@ -356,11 +416,15 @@ internal sealed class HotkeySpec
         return string.Join(" + ", lpParts);
     }
 
-    /// <summary>两个 Chord 是否完全相同（用于检测与快速切换热键的冲突）。</summary>
-    public bool SameAs(HotkeySpec other) => Kind == HotkeyKind.Chord
-        && other.Kind == HotkeyKind.Chord
-        && Modifiers == other.Modifiers
-        && VirtualKey == other.VirtualKey;
+    /// <summary>两个 Chord 是否完全相同（用于检测与快速切换热键的冲突）；鼠标方式按按键比较。</summary>
+    public bool SameAs(HotkeySpec other) => Kind == other.Kind
+        && Kind switch
+        {
+            HotkeyKind.Chord => Modifiers == other.Modifiers && VirtualKey == other.VirtualKey,
+            HotkeyKind.DoubleTap => TapVirtualKey == other.TapVirtualKey,
+            HotkeyKind.Mouse => MouseButton == other.MouseButton,
+            _ => false
+        };
 
     /// <summary>用于 SendInput 的修饰键虚拟键序列。</summary>
     public IReadOnlyList<ushort> GetModifierVirtualKeys()

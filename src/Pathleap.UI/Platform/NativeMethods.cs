@@ -52,6 +52,13 @@ internal static class NativeMethods
 
     public const uint KeyeventfKeyUp = 0x0002;
     public const uint InputKeyboard = 1;
+    public const uint InputMouse = 0;
+    public const uint MousEventfMiddleDown = 0x0020;
+    public const uint MousEventfMiddleUp = 0x0040;
+    public const uint MousEventfXDown = 0x0080;
+    public const uint MousEventfXUp = 0x0100;
+    public const uint XButton1 = 0x0001;
+    public const uint XButton2 = 0x0002;
 
     public static readonly IntPtr HwndMessage = new(-3);
 

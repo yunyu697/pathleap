@@ -124,11 +124,17 @@ public partial class App : Application
             var lpScreenMode = !string.IsNullOrEmpty(Program.Startup.Screen);
             if (!_lpNativeHost.HotkeyRegistered)
             {
-                var lpMessage = _lpHotkey.IsDoubleTap
-                    ? $"双击唤醒 {_lpHotkey.Display} 不可用（Win32={_lpNativeHost.HotkeyErrorCode}）：低层键盘钩子未能安装，" +
-                      "常见于安全软件拦截或权限不足。请从托盘菜单打开搜索，或在设置「快捷键」里改用组合键。"
-                    : $"热键 {_lpHotkey.Display} 注册失败（Win32={_lpNativeHost.HotkeyErrorCode}）。" +
-                      "请从托盘菜单打开搜索，或在设置「快捷键」里换用其它预置方式。";
+                var lpMessage = _lpHotkey.Kind switch
+                {
+                    HotkeyKind.DoubleTap =>
+                        $"双击唤醒 {_lpHotkey.Display} 不可用（Win32={_lpNativeHost.HotkeyErrorCode}）：低层键盘钩子未能安装，" +
+                        "常见于安全软件拦截或权限不足。请从托盘菜单打开搜索，或在设置「快捷键」里改用组合键。",
+                    HotkeyKind.Mouse =>
+                        $"鼠标唤醒 {_lpHotkey.Display} 不可用（Win32={_lpNativeHost.HotkeyErrorCode}）：低层鼠标钩子未能安装，" +
+                        "常见于安全软件拦截或权限不足。请从托盘菜单打开搜索，或在设置「快捷键」里改用组合键。",
+                    _ => $"热键 {_lpHotkey.Display} 注册失败（Win32={_lpNativeHost.HotkeyErrorCode}）。" +
+                         "请从托盘菜单打开搜索，或在设置「快捷键」里换用其它预置方式。"
+                };
                 AppLog.Warn(lpMessage);
                 _lpNativeHost.ShowTrayWarning($"{Branding.DisplayName} 唤醒方式不可用", lpMessage);
                 if (!Program.Startup.AutoBench && !lpScreenMode)

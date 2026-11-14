@@ -231,8 +231,8 @@ public sealed partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 渲染预置唤醒方式清单（双击 Ctrl/Alt/Shift 与组合键）。每项都标明适用与冲突风险，
-    /// 选中后立即交给宿主重注册；鼠标中键/侧键未接入，不在这里放假开关。
+    /// 渲染预置唤醒方式清单（双击 Ctrl/Alt/Shift、组合键与鼠标按键）。每项都标明适用与冲突风险，
+    /// 选中后立即交给宿主重注册；鼠标方式由低层鼠标钩子判定，按键本身不拦截。
     /// </summary>
     private void BuildHotkeyPresets()
     {

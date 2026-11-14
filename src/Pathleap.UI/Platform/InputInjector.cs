@@ -18,6 +18,12 @@ internal static class InputInjector
             return Send(new[] { CreateKey(lpKey, keyUp: false), CreateKey(lpKey, keyUp: true) });
         }
 
+        if (spec.IsMouse)
+        {
+            // 鼠标唤醒：注入一次按键的按下与抬起，和真实鼠标走同一条低层钩子路径。
+            return Send(new[] { CreateMouseButton(spec.MouseButton, up: false), CreateMouseButton(spec.MouseButton, up: true) });
+        }
+
         var lpModifiers = spec.GetModifierVirtualKeys();
         var lpInputs = new List<NativeMethods.Input>(lpModifiers.Count * 2 + 2);
         foreach (var lpModifier in lpModifiers)
@@ -71,6 +77,28 @@ internal static class InputInjector
             {
                 VirtualKey = virtualKey,
                 Flags = keyUp ? NativeMethods.KeyeventfKeyUp : 0
+            }
+        }
+    };
+
+    private static NativeMethods.Input CreateMouseButton(int button, bool up) => new()
+    {
+        Type = NativeMethods.InputMouse,
+        Data = new NativeMethods.InputUnion
+        {
+            Mouse = new NativeMethods.MouseInput
+            {
+                MouseData = button switch
+                {
+                    1 => NativeMethods.XButton1,
+                    2 => NativeMethods.XButton2,
+                    _ => 0
+                },
+                Flags = button switch
+                {
+                    1 or 2 => up ? NativeMethods.MousEventfXUp : NativeMethods.MousEventfXDown,
+                    _ => up ? NativeMethods.MousEventfMiddleUp : NativeMethods.MousEventfMiddleDown
+                }
             }
         }
     };
